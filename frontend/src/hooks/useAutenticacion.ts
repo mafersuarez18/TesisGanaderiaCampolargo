@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAutenticacionStore } from '../stores/autenticacionStore';
 import { clienteHttp } from '../servicios/clienteAxios';
+import { vaciarCacheOffline } from '../servicios/cacheOffline';
+import { precargarDatosOffline, olvidarUltimaPrecarga } from '../servicios/precargaOffline';
 import toast from 'react-hot-toast';
 
 interface DatosInicioSesion {
@@ -28,6 +30,8 @@ export function useAutenticacion() {
       tienda.iniciarSesion(usuario, tokenAcceso, tokenRefresh, expiraEn);
       toast.success(`Bienvenido, ${usuario.nombre}`);
       navegar('/dashboard');
+      // Deja toda la app disponible sin conexión desde el primer momento.
+      precargarDatosOffline({ forzar: true, avisar: true });
     } finally {
       setCargando(false);
     }
@@ -39,6 +43,10 @@ export function useAutenticacion() {
     } catch {
       // Si falla el cierre en servidor, igual limpiamos localmente
     } finally {
+      // Los datos guardados para uso sin conexión son de este usuario: no
+      // deben quedar en el dispositivo para el próximo que inicie sesión.
+      await vaciarCacheOffline();
+      olvidarUltimaPrecarga();
       tienda.cerrarSesion();
       navegar('/iniciar-sesion');
       toast.success('Sesión cerrada correctamente');

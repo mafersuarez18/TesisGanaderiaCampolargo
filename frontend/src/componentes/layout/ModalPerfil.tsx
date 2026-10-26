@@ -32,9 +32,11 @@ export default function ModalPerfil({ abierto, alCerrar }: PropsModalPerfil) {
   const mutacionDatos = useMutation({
     mutationFn: () => clienteHttp.patch('/usuarios/mi-perfil', { nombre, apellido, cargo, telefono }),
     onSuccess: (res) => {
-      const { nombre, apellido, cargo } = res.data.datos;
-      tienda.actualizarUsuario({ nombre, apellido, cargo });
-      toast.success('Perfil actualizado correctamente');
+      // Sin conexión la edición quedó en la cola offline y el servidor no
+      // devolvió datos: se reflejan los que se acaban de escribir.
+      const datos = res.data.datos ?? { nombre, apellido, cargo };
+      tienda.actualizarUsuario({ nombre: datos.nombre, apellido: datos.apellido, cargo: datos.cargo });
+      if (!res.data.offline) toast.success('Perfil actualizado correctamente');
       alCerrar();
     },
     onError: (error: any) => {

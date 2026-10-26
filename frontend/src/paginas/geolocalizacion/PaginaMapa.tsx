@@ -106,6 +106,10 @@ const api = {
     return clienteHttp
       .post(`/geolocalizacion/dispositivos/${dispositivoId}/importar`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        // Un FormData con archivo no se puede guardar en la cola offline
+        // (IndexedDB) y el resultado de la importación hace falta de
+        // inmediato: sin conexión debe fallar en vez de encolarse.
+        sinCola: true,
       })
       .then((r) => r.data.datos);
   },

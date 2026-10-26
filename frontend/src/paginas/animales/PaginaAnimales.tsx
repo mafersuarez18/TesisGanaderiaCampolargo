@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { clienteHttp } from '../../servicios/clienteAxios';
+import { obtenerPendientes, suscribirseACola } from '../../servicios/colaSincronizacion';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Tabla, { ColumnaTabla } from '../../componentes/ui/Tabla';
 import Paginacion from '../../componentes/ui/Paginacion';
@@ -110,6 +111,45 @@ const COLUMNAS: ColumnaTabla<Animal>[] = [
   },
 ];
 
+// Animales registrados sin conexión que todavía no llegan al servidor (están
+// en la cola offline): no pueden salir en el listado hasta sincronizarse,
+// así que se avisa cuáles son y que van a aparecer al volver la señal.
+function AvisoAnimalesPendientes() {
+  const [pendientes, setPendientes] = useState<string[]>([]);
+
+  useEffect(() => {
+    const actualizar = () =>
+      obtenerPendientes().then((cola) => setPendientes(
+        cola
+          .filter((p) => p.metodo === 'post' && p.url === '/animales')
+          .map((p) => (p.datos as { numeroIdentificacion?: string } | undefined)?.numeroIdentificacion ?? ''),
+      ));
+    actualizar();
+    return suscribirseACola(actualizar);
+  }, []);
+
+  if (pendientes.length === 0) return null;
+  const identificados = pendientes.filter(Boolean).map((n) => `#${n}`).join(', ');
+
+  return (
+    <div className="flex items-start gap-3 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800">
+      <Icono nombre="cloud_upload" clase="text-[22px] flex-shrink-0" />
+      <div className="text-sm">
+        <p className="font-semibold">
+          {pendientes.length === 1
+            ? '1 animal registrado sin conexión'
+            : `${pendientes.length} animales registrados sin conexión`}
+          {identificados && ` (${identificados})`}
+        </p>
+        <p className="mt-0.5">
+          Está{pendientes.length === 1 ? '' : 'n'} guardado{pendientes.length === 1 ? '' : 's'} en el dispositivo y
+          aparecerá{pendientes.length === 1 ? '' : 'n'} en el registro cuando se recupere la conectividad.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 async function obtenerAnimales(params: Record<string, string>): Promise<RespuestaAnimales> {
   const qs = new URLSearchParams(params).toString();
   const { data } = await clienteHttp.get(`/animales?${qs}`);
@@ -204,6 +244,8 @@ export default function PaginaAnimales() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-5"
     >
+      <AvisoAnimalesPendientes />
+
       {/* Encabezado */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3">

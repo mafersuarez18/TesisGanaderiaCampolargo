@@ -1,35 +1,21 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
 import App from './App';
+import { clienteQuery } from './servicios/clienteQuery';
+import { iniciarPrecargaAutomatica } from './servicios/precargaOffline';
 import './estilos/global.css';
 
 // Punto de entrada de la SPA: monta el árbol de React con el router, el
 // cliente de React Query (caché de datos del servidor) y el sistema de
 // notificaciones toast, todos compartidos por toda la aplicación.
-const clienteQuery = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 5,          // 5 minutos antes de refetch automático
-      gcTime: 1000 * 60 * 30,             // 30 minutos en caché
-      // Reintentar una sola vez, pero nunca ante un error 4xx (permisos,
-      // validación, "no encontrado"...): reintentar no lo va a arreglar, y
-      // cada intento fallido dispara su propio toast de error.
-      retry: (conteoFallos, error) => {
-        const status = (error as { response?: { status?: number } })?.response?.status;
-        if (status && status >= 400 && status < 500) return false;
-        return conteoFallos < 1;
-      },
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
+
+// Descarga en segundo plano los datos de todas las pantallas para que la
+// app se pueda usar sin conexión sin haberlas visitado antes.
+iniciarPrecargaAutomatica();
 
 const elementoRaiz = document.getElementById('raiz');
 if (!elementoRaiz) throw new Error('No se encontró el elemento raíz #raiz');

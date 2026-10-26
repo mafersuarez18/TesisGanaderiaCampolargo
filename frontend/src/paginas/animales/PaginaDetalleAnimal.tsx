@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import Icono from '../../componentes/ui/Icono';
 import { clienteHttp } from '../../servicios/clienteAxios';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
+import { useOnline } from '../../hooks/useOnline';
 import Badge, { BadgeEstadoAnimal } from '../../componentes/ui/Badge';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
 import { EsqueletoLinea } from '../../componentes/ui/EsqueletoTarjeta';
@@ -47,6 +48,7 @@ export default function PaginaDetalleAnimal() {
 
   const [modalEliminar, setModalEliminar] = useState(false);
 
+  const estaEnLinea = useOnline();
   const { data: animal, isLoading } = useQuery({
     queryKey: ['animal', id],
     queryFn: () => obtenerAnimal(id!),
@@ -68,8 +70,12 @@ export default function PaginaDetalleAnimal() {
   if (isLoading) return <EsqueletoDetalle />;
   if (!animal) return (
     <div className="text-center py-20">
-      <Icono nombre="error_outline" clase="text-[32px] text-outline mx-auto mb-2" />
-      <p className="text-on-surface-variant">Animal no encontrado</p>
+      <Icono nombre={estaEnLinea ? 'error_outline' : 'wifi_off'} clase="text-[32px] text-outline mx-auto mb-2" />
+      <p className="text-on-surface-variant">
+        {estaEnLinea
+          ? 'Animal no encontrado'
+          : 'Sin conexión: la ficha de este animal no está guardada en el dispositivo. Se podrá ver cuando se recupere la conectividad.'}
+      </p>
       <Link to="/animales" className="text-sm text-primary hover:underline mt-2 block">
         Volver al listado
       </Link>

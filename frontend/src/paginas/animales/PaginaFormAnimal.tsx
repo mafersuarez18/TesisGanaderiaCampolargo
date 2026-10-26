@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import Icono from '../../componentes/ui/Icono';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
 import CampoFecha from '../../componentes/ui/CampoFecha';
-import { clienteHttp } from '../../servicios/clienteAxios';
+import { clienteHttp, ID_TOAST_CONEXION } from '../../servicios/clienteAxios';
 import toast from 'react-hot-toast';
 
 // Formulario de alta/edición de animal. La raza usa el patrón "buscar o
@@ -175,6 +175,20 @@ export default function PaginaFormAnimal() {
     onSuccess: (animal) => {
       cliente.invalidateQueries({ queryKey: ['animales'] });
       cliente.invalidateQueries({ queryKey: ['animal', id] });
+      // Sin conexión el registro quedó en la cola offline y todavía no hay
+      // animal creado al cual navegar: se vuelve al listado (o a la ficha, si
+      // era una edición) y se reemplaza el aviso genérico del interceptor
+      // por uno que explica cuándo se va a ver el cambio.
+      if (!animal) {
+        toast(
+          esEdicion
+            ? 'Sin conexión: los cambios se guardaron en el dispositivo y se verán en la ficha cuando se recupere la conectividad.'
+            : 'Sin conexión: el animal se guardó en el dispositivo y aparecerá en el registro cuando se recupere la conectividad.',
+          { id: ID_TOAST_CONEXION, icon: '📶', duration: 8000 },
+        );
+        navegar(esEdicion ? `/animales/${id}` : '/animales');
+        return;
+      }
       toast.success(esEdicion ? 'Animal actualizado correctamente' : 'Animal registrado correctamente');
       navegar(`/animales/${animal.id}`);
     },

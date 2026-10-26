@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { clienteHttp } from '../../servicios/clienteAxios';
+import { rangoAnioEnCurso } from '../../servicios/precargaOffline';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import EsqueletoTarjeta from '../../componentes/ui/EsqueletoTarjeta';
 import GraficaAnimalesPorFinca from './componentes/GraficaAnimalesPorFinca';
@@ -47,10 +48,11 @@ interface RecurrenciaPatologias {
 }
 
 async function obtenerPorcentajeTratados(): Promise<PorcentajeTratados> {
-  const inicioAnio = new Date(new Date().getFullYear(), 0, 1).toISOString();
-  const hoy = new Date().toISOString();
+  // "Hasta" es el final de hoy, no el instante actual: así la consulta es la
+  // misma durante todo el día y se puede responder sin conexión con la que
+  // dejó guardada la precarga.
   const { data } = await clienteHttp.get('/analytics/porcentaje-tratados', {
-    params: { desde: inicioAnio, hasta: hoy },
+    params: rangoAnioEnCurso(),
   });
   return data.datos;
 }

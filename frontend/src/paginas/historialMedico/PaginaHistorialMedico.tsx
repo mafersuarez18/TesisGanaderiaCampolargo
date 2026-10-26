@@ -960,7 +960,10 @@ function TarjetaPruebaComplementaria({
     mutationFn: () =>
       clienteHttp
         .patch(`/historial-medico/pruebas-complementarias/${prueba.id}`, { resultado, observaciones })
-        .then((r) => r.data.datos as PruebaComplementaria),
+        // Sin conexión la edición queda en la cola offline y no vuelven
+        // datos del servidor: se muestra lo que se acaba de escribir.
+        .then((r) => (r.data.datos as PruebaComplementaria | null)
+          ?? { ...prueba, resultado: resultado.trim() || null, observaciones: observaciones.trim() || null }),
     onSuccess: (actualizada) => {
       onActualizada(actualizada);
       setEditando(false);
