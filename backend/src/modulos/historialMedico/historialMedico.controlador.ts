@@ -8,6 +8,7 @@ import {
   eliminarHistorialMedico,
   obtenerPrefillConsulta,
   finalizarTratamiento,
+  actualizarPruebaComplementaria,
 } from './historialMedico.servicio';
 import {
   respuestaExito,
@@ -121,6 +122,12 @@ const esquemaFinalizarTratamiento = z.object({
   observaciones: z.string().max(500).optional(),
 });
 
+const esquemaActualizarPrueba = z.object({
+  fecha:         z.coerce.date().nullable().optional(),
+  resultado:     z.string().max(1000).nullable().optional(),
+  observaciones: z.string().max(500).nullable().optional(),
+});
+
 const esquemaFiltros = z.object({
   animalId:  z.string().min(1).optional(),
   fincaId:   z.string().min(1).optional(),
@@ -179,6 +186,16 @@ export async function controladorFinalizarTratamiento(
     const datos = esquemaFinalizarTratamiento.parse(req.body);
     const resultado = await finalizarTratamiento(req.params['id'] as string, datos);
     return respuestaExito(res, resultado);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorActualizarPrueba(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = esquemaActualizarPrueba.parse(req.body);
+    const prueba = await actualizarPruebaComplementaria(req.params['id'] as string, datos);
+    return respuestaExito(res, prueba);
   } catch (error) { return next(error); }
 }
 

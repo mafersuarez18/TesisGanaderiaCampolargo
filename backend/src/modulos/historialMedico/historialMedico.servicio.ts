@@ -502,6 +502,34 @@ export async function finalizarTratamiento(tratamientoId: string, datos: DatosFi
   return { tratamientoId, animalId, nuevoEstadoSanitario };
 }
 
+export interface DatosActualizarPruebaComplementaria {
+  fecha?:         Date | null;
+  resultado?:     string | null;
+  observaciones?: string | null;
+}
+
+/**
+ * Registra (o corrige) el resultado de una prueba complementaria después de
+ * creada la consulta: los exámenes de laboratorio suelen tardar días, así
+ * que la prueba se guarda primero sin resultado y se completa al llegar.
+ * Solo se tocan los campos enviados; un string vacío deja el campo en null.
+ */
+export async function actualizarPruebaComplementaria(id: string, datos: DatosActualizarPruebaComplementaria) {
+  const prueba = await prisma.pruebaComplementaria.findUnique({ where: { id }, select: { id: true } });
+  if (!prueba) throw new ErrorNoEncontrado(`Prueba complementaria con id '${id}'`);
+
+  const vacioANull = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null);
+
+  return prisma.pruebaComplementaria.update({
+    where: { id },
+    data: {
+      fecha:         datos.fecha,
+      resultado:     vacioANull(datos.resultado),
+      observaciones: vacioANull(datos.observaciones),
+    },
+  });
+}
+
 export async function eliminarHistorialMedico(id: string) {
   const historial = await prisma.historialMedico.findUnique({
     where: { id },

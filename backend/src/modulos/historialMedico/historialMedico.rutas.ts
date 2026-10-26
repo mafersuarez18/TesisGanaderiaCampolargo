@@ -11,6 +11,7 @@ import {
   controladorEliminarHistorial,
   controladorPrefillConsulta,
   controladorFinalizarTratamiento,
+  controladorActualizarPrueba,
 } from './historialMedico.controlador';
 
 const enrutador = Router();
@@ -40,6 +41,15 @@ enrutador.patch(
   requerirPrivilegio('historial_medico.crear'),
   registrarAuditoria('Finalizar tratamiento', 'Tratamiento'),
   controladorFinalizarTratamiento,
+);
+
+// Completa el resultado de una prueba complementaria que se registró sin él
+// (el laboratorio todavía no lo había entregado al momento de la consulta).
+enrutador.patch(
+  '/pruebas-complementarias/:id',
+  requerirPrivilegio('historial_medico.crear'),
+  registrarAuditoria('Actualizar resultado de prueba complementaria', 'PruebaComplementaria'),
+  controladorActualizarPrueba,
 );
 
 enrutador.delete(
