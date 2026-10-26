@@ -7,7 +7,6 @@ import GraficaAnimalesPorFinca from './componentes/GraficaAnimalesPorFinca';
 import GraficaIndicadoresReproductivos from './componentes/GraficaIndicadoresReproductivos';
 import ListaAlertasRecientes from './componentes/ListaAlertasRecientes';
 import ListaPartosProximos from './componentes/ListaPartosProximos';
-import ResumenPlanSanitario from './componentes/ResumenPlanSanitario';
 import Icono from '../../componentes/ui/Icono';
 import { Link } from 'react-router-dom';
 
@@ -279,7 +278,7 @@ export default function PaginaDashboard() {
 
       {/* Listas recientes */}
       <motion.div variants={variantesElemento}>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="tarjeta-vidrio rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm text-on-surface flex items-center gap-2">
@@ -303,18 +302,6 @@ export default function PaginaDashboard() {
               </Link>
             </div>
             <ListaPartosProximos />
-          </div>
-          <div className="tarjeta-vidrio rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-sm text-on-surface flex items-center gap-2">
-                <Icono nombre="event_available" clase="text-[18px] text-primary" />
-                Plan Sanitario
-              </h3>
-              <Link to="/plan-sanitario" className="text-xs text-primary hover:underline flex items-center gap-0.5">
-                Ver plan <Icono nombre="arrow_forward" clase="text-[14px]" />
-              </Link>
-            </div>
-            <ResumenPlanSanitario />
           </div>
         </div>
       </motion.div>

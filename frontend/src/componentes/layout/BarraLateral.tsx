@@ -20,7 +20,6 @@ const elementosNav: ElementoNav[] = [
   { etiqueta: 'Animales',        ruta: '/animales',        icono: 'pets' },
   { etiqueta: 'Historial Médico',ruta: '/historial-medico',icono: 'medical_services', soloVetOAdmin: true },
   { etiqueta: 'Vacunación y Desparasitación', ruta: '/vacunacion', icono: 'vaccines', soloVetOAdmin: true },
-  { etiqueta: 'Plan Sanitario',  ruta: '/plan-sanitario',  icono: 'event_available', soloVetOAdmin: true },
   { etiqueta: 'Reproducción',    ruta: '/reproduccion',    icono: 'pregnant_woman',    soloVetOAdmin: true },
   { etiqueta: 'Inseminación',    ruta: '/inseminacion',    icono: 'science',           soloVetOAdmin: true },
   { etiqueta: 'Geolocalización', ruta: '/mapa',            icono: 'map' },
