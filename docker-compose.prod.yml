@@ -32,6 +32,8 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@base-datos:5432/${POSTGRES_DB}
+      # El schema de Prisma exige DIRECT_URL; sin pooler va igual que DATABASE_URL
+      DIRECT_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@base-datos:5432/${POSTGRES_DB}
       JWT_SECRETO: ${JWT_SECRETO}
       JWT_SECRETO_REFRESH: ${JWT_SECRETO_REFRESH}
       PUERTO: 3001

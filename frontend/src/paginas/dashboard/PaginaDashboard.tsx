@@ -8,6 +8,7 @@ import GraficaAnimalesPorFinca from './componentes/GraficaAnimalesPorFinca';
 import GraficaIndicadoresReproductivos from './componentes/GraficaIndicadoresReproductivos';
 import ListaAlertasRecientes from './componentes/ListaAlertasRecientes';
 import ListaPartosProximos from './componentes/ListaPartosProximos';
+import LeyendaIndicador, { ExplicacionIndicador } from './componentes/LeyendaIndicador';
 import Icono from '../../componentes/ui/Icono';
 import { Link } from 'react-router-dom';
 
@@ -27,6 +28,14 @@ interface ResumenDashboard {
     tasaNatalidad: number;
     tasaMortalidadCrias: number;
     diasAbiertoPromedio: number;
+  };
+  detalleIndicadores?: {
+    hembrasActivas: number;
+    gestacionesEnCurso: number;
+    nacimientos: number;
+    desdeNacimientos: string;
+    muertesCrias: number;
+    partosConsiderados: number;
   };
 }
 
@@ -62,6 +71,97 @@ async function obtenerRecurrenciaPatologias(): Promise<RecurrenciaPatologias> {
   return data.datos;
 }
 
+// ── Leyendas de los indicadores ──────────────────────────────────────────────
+// Describen exactamente lo que calcula analytics.servicio.ts en el backend,
+// con los valores actuales. Si cambia una fórmula allá, actualizarla aquí.
+
+function porcentaje(parte: number, total: number, sinTotal: string): string {
+  if (total <= 0) return `${sinTotal}, el indicador queda en 0 %`;
+  return `${parte} ÷ ${total} × 100 = ${((parte / total) * 100).toFixed(1)} %`;
+}
+
+function construirExplicaciones(
+  resumen?: ResumenDashboard,
+  tratados?: PorcentajeTratados,
+  recurrencia?: RecurrenciaPatologias,
+): Record<string, ExplicacionIndicador> {
+  const d = resumen?.detalleIndicadores;
+  const desde = d ? new Date(d.desdeNacimientos).toLocaleDateString('es-VE') : `01/01/${new Date().getFullYear() - 1}`;
+
+  return {
+    totalAnimales: {
+      titulo: 'Total Animales',
+      descripcion: 'Cantidad de animales con estado Activo. No incluye vendidos, muertos, robados ni transferidos.',
+      calculo: resumen ? `${resumen.totalAnimales} animales activos` : undefined,
+    },
+    alertasActivas: {
+      titulo: 'Alertas Activas',
+      descripcion: 'Notificaciones generadas por el motor de alertas que todavía no se han leído, de todos los usuarios. "Críticas" son las de prioridad crítica.',
+      calculo: resumen ? `${resumen.alertasActivas} sin leer, de las cuales ${resumen.alertasCriticas} son críticas` : undefined,
+    },
+    partos30: {
+      titulo: 'Partos (30 días)',
+      descripcion: 'Gestaciones en curso cuya fecha probable de parto cae entre hoy y los próximos 30 días.',
+      calculo: resumen ? `${resumen.partosProximos30Dias} gestaciones con parto esperado en 30 días` : undefined,
+    },
+    vacunasPendientes: {
+      titulo: 'Vacunas Pendientes',
+      descripcion: 'Cantidad de calendarios de vacunación y desparasitación registrados en el sistema.',
+      calculo: resumen ? `${resumen.vacunasPendientes} calendarios registrados` : undefined,
+      nota: 'Hoy cuenta calendarios, no aplicaciones vencidas. Las vacunas vencidas o próximas se avisan en Alertas.',
+    },
+    enfermedades: {
+      titulo: 'Enfermedades',
+      descripcion: 'Animales cuyo estado sanitario actual es Enfermo.',
+      calculo: resumen ? `${resumen.enfermedadesActivas} animales enfermos` : undefined,
+    },
+    preniez: {
+      titulo: 'Tasa de Preñez',
+      descripcion: 'Proporción de las hembras activas que tienen una gestación en curso.',
+      formula: 'Gestaciones en curso ÷ hembras activas × 100',
+      calculo: d ? porcentaje(d.gestacionesEnCurso, d.hembrasActivas, 'Sin hembras activas') : undefined,
+    },
+    natalidad: {
+      titulo: 'Tasa de Natalidad',
+      descripcion: `Nacimientos registrados desde el ${desde} en relación con las hembras activas.`,
+      formula: 'Nacimientos ÷ hembras activas × 100',
+      calculo: d ? porcentaje(d.nacimientos, d.hembrasActivas, 'Sin hembras activas') : undefined,
+      nota: 'Cuenta los nacimientos desde el 1 de enero del año anterior, no solo los de los últimos 12 meses.',
+    },
+    mortalidad: {
+      titulo: 'Mortalidad de Crías',
+      descripcion: `Animales con estado Muerto nacidos en los últimos 365 días, en relación con los nacimientos registrados desde el ${desde}.`,
+      formula: 'Crías muertas ÷ nacimientos × 100',
+      calculo: d ? porcentaje(d.muertesCrias, d.nacimientos, 'Sin nacimientos registrados') : undefined,
+    },
+    diasAbiertos: {
+      titulo: 'Días Abiertos',
+      descripcion: 'Promedio de días transcurridos desde cada parto registrado (gestaciones finalizadas por parto) hasta hoy, contando como máximo 365 días por parto.',
+      formula: 'Suma de días desde cada parto ÷ cantidad de partos',
+      calculo: d
+        ? (d.partosConsiderados > 0
+          ? `Promedio sobre ${d.partosConsiderados} partos = ${resumen!.indicadoresReproductivos.diasAbiertoPromedio} días`
+          : 'Sin partos registrados: se muestra el valor de referencia de 120 días')
+        : undefined,
+      nota: 'Es una aproximación: mide los días desde el último parto aunque la vaca ya haya quedado preñada de nuevo.',
+    },
+    tratados: {
+      titulo: 'Animales tratados este año',
+      descripcion: 'Animales distintos que recibieron al menos un tratamiento iniciado entre el 1 de enero y hoy, en relación con los animales activos.',
+      formula: 'Animales tratados ÷ animales activos × 100',
+      calculo: tratados ? porcentaje(tratados.animalesTratados, tratados.totalAnimalesActivos, 'Sin animales activos') : undefined,
+    },
+    recurrencia: {
+      titulo: 'Recurrencia de patologías',
+      descripcion: 'De los animales que alguna vez tuvieron un diagnóstico, cuántos tuvieron la misma enfermedad diagnosticada en 2 o más ocasiones (se compara el nombre de la enfermedad). Considera todo el historial.',
+      formula: 'Animales con enfermedad repetida ÷ animales con diagnóstico × 100',
+      calculo: recurrencia
+        ? porcentaje(recurrencia.animalesConRecurrencia, recurrencia.totalAnimalesConDiagnostico, 'Sin animales con diagnóstico')
+        : undefined,
+    },
+  };
+}
+
 const variantesContenedor = {
   oculto: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.07 } },
@@ -93,6 +193,8 @@ export default function PaginaDashboard() {
     queryFn: obtenerRecurrenciaPatologias,
     enabled: puedeVerAnalyticsAvanzado,
   });
+
+  const explicaciones = construirExplicaciones(resumen, tratados, recurrencia);
 
   const hora = new Date().getHours();
   const saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
@@ -126,6 +228,7 @@ export default function PaginaDashboard() {
           <TarjetaKPI
             icono="pets"
             etiqueta="Total Animales"
+            explicacion={explicaciones.totalAnimales}
             valor={resumen?.totalAnimales}
             colorIcono="text-primary"
             fondoIcono="bg-primary/10"
@@ -134,6 +237,7 @@ export default function PaginaDashboard() {
           <TarjetaKPI
             icono="warning"
             etiqueta="Alertas Activas"
+            explicacion={explicaciones.alertasActivas}
             valor={resumen?.alertasActivas}
             subvalor={resumen?.alertasCriticas ? `${resumen.alertasCriticas} críticas` : undefined}
             colorIcono="text-error"
@@ -145,6 +249,7 @@ export default function PaginaDashboard() {
           <TarjetaKPI
             icono="pregnant_woman"
             etiqueta="Partos (30 días)"
+            explicacion={explicaciones.partos30}
             valor={resumen?.partosProximos30Dias}
             colorIcono="text-secondary"
             fondoIcono="bg-secondary-container"
@@ -153,6 +258,7 @@ export default function PaginaDashboard() {
           <TarjetaKPI
             icono="vaccines"
             etiqueta="Vacunas Pendientes"
+            explicacion={explicaciones.vacunasPendientes}
             valor={resumen?.vacunasPendientes}
             colorIcono="text-tertiary"
             fondoIcono="bg-tertiary-container/20"
@@ -162,6 +268,7 @@ export default function PaginaDashboard() {
           <TarjetaKPI
             icono="medical_services"
             etiqueta="Enfermedades"
+            explicacion={explicaciones.enfermedades}
             valor={resumen?.enfermedadesActivas}
             colorIcono="text-error"
             fondoIcono="bg-error-container"
@@ -177,10 +284,10 @@ export default function PaginaDashboard() {
         </p>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           {[
-            { et: 'Tasa de Preñez',    val: resumen?.indicadoresReproductivos.tasaPreniez,        uni: '%',    ico: 'trending_up',   pos: true  },
-            { et: 'Tasa de Natalidad', val: resumen?.indicadoresReproductivos.tasaNatalidad,       uni: '%',    ico: 'trending_up',   pos: true  },
-            { et: 'Mortalidad Crías',  val: resumen?.indicadoresReproductivos.tasaMortalidadCrias, uni: '%',    ico: 'trending_down', pos: false },
-            { et: 'Días Abiertos',     val: resumen?.indicadoresReproductivos.diasAbiertoPromedio, uni: ' días',ico: 'schedule',      pos: false },
+            { clave: 'preniez', et: 'Tasa de Preñez',    val: resumen?.indicadoresReproductivos.tasaPreniez,        uni: '%',    ico: 'trending_up',   pos: true  },
+            { clave: 'natalidad', et: 'Tasa de Natalidad', val: resumen?.indicadoresReproductivos.tasaNatalidad,       uni: '%',    ico: 'trending_up',   pos: true  },
+            { clave: 'mortalidad', et: 'Mortalidad Crías',  val: resumen?.indicadoresReproductivos.tasaMortalidadCrias, uni: '%',    ico: 'trending_down', pos: false },
+            { clave: 'diasAbiertos', et: 'Días Abiertos',     val: resumen?.indicadoresReproductivos.diasAbiertoPromedio, uni: ' días',ico: 'schedule',      pos: false },
           ].map((ind) => (
             <div key={ind.et} className="tarjeta-vidrio rounded-2xl p-4">
               {isLoading ? (
@@ -193,6 +300,7 @@ export default function PaginaDashboard() {
                       clase={`text-[16px] ${ind.pos ? 'text-primary' : 'text-error'}`}
                     />
                     <p className="text-xs text-on-surface-variant truncate">{ind.et}</p>
+                    <span className="ml-auto"><LeyendaIndicador explicacion={explicaciones[ind.clave]!} /></span>
                   </div>
                   <p className="text-xl font-bold text-on-surface">
                     {ind.val?.toFixed(1) ?? '—'}
@@ -220,6 +328,7 @@ export default function PaginaDashboard() {
                   <div className="flex items-center gap-1.5 mb-2">
                     <Icono nombre="vaccines" clase="text-[16px] text-primary" />
                     <p className="text-xs text-on-surface-variant truncate">Animales tratados este año</p>
+                    <span className="ml-auto"><LeyendaIndicador explicacion={explicaciones.tratados!} /></span>
                   </div>
                   <p className="text-xl font-bold text-on-surface">
                     {tratados?.porcentajeTratados.toFixed(1) ?? '—'}
@@ -239,6 +348,7 @@ export default function PaginaDashboard() {
                   <div className="flex items-center gap-1.5 mb-2">
                     <Icono nombre="autorenew" clase="text-[16px] text-error" />
                     <p className="text-xs text-on-surface-variant truncate">Recurrencia de patologías</p>
+                    <span className="ml-auto"><LeyendaIndicador explicacion={explicaciones.recurrencia!} /></span>
                   </div>
                   <p className="text-xl font-bold text-on-surface">
                     {recurrencia?.tasaRecurrencia.toFixed(1) ?? '—'}
@@ -323,9 +433,10 @@ interface PropsTarjetaKPI {
   colorValor?: string;
   bordeError?: boolean;
   cargando?: boolean;
+  explicacion: ExplicacionIndicador;
 }
 
-function TarjetaKPI({ icono, etiqueta, valor, subvalor, colorIcono, fondoIcono, colorValor, bordeError, cargando }: PropsTarjetaKPI) {
+function TarjetaKPI({ icono, etiqueta, valor, subvalor, colorIcono, fondoIcono, colorValor, bordeError, cargando, explicacion }: PropsTarjetaKPI) {
   if (cargando) return <EsqueletoTarjeta className="h-28" />;
 
   return (
@@ -335,6 +446,7 @@ function TarjetaKPI({ icono, etiqueta, valor, subvalor, colorIcono, fondoIcono, 
         <div className={`${fondoIcono} p-2.5 rounded-xl flex-shrink-0`}>
           <Icono nombre={icono} relleno clase={`text-[20px] ${colorIcono}`} />
         </div>
+        <LeyendaIndicador explicacion={explicacion} />
       </div>
       <p className={`text-2xl font-bold ${colorValor ?? 'text-on-surface'}`}>
         {valor?.toLocaleString('es-VE') ?? '—'}

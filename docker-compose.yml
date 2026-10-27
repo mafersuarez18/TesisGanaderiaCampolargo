@@ -32,6 +32,8 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://${POSTGRES_USER:-campolargo_admin}:${POSTGRES_PASSWORD:-campolargo2026}@base-datos:5432/${POSTGRES_DB:-campolargo}
+      # El schema de Prisma exige DIRECT_URL; sin pooler va igual que DATABASE_URL
+      DIRECT_URL: postgresql://${POSTGRES_USER:-campolargo_admin}:${POSTGRES_PASSWORD:-campolargo2026}@base-datos:5432/${POSTGRES_DB:-campolargo}
       JWT_SECRETO: ${JWT_SECRETO:-secreto_desarrollo_campolargo_2026}
       JWT_SECRETO_REFRESH: ${JWT_SECRETO_REFRESH:-secreto_refresh_campolargo_2026}
       PUERTO: ${BACKEND_PUERTO:-3001}

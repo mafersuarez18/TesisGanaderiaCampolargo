@@ -60,8 +60,8 @@ export default function BarraLateral({ alCerrar, esMobil = false }: PropiedadesB
       <div className="mb-4">
         <div className="flex items-center gap-3">
           <img
-            src="/logo-campolargo.png"
-            alt="Logo LinajeApp"
+            src="/logo-ganaderia-campolargo.png"
+            alt="Logo Ganadería Campolargo"
             className="w-12 h-12 object-contain flex-shrink-0"
           />
           <div>

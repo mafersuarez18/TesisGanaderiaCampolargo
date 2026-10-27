@@ -107,7 +107,7 @@ export async function obtenerResumenDashboard() {
     : 0;
 
   // Días abiertos: promedio de tiempo entre parto y nueva gestación (simplificado)
-  const diasAbiertoPromedio = await calcularDiasAbiertoPromedio();
+  const { promedio: diasAbiertoPromedio, partosConsiderados } = await calcularDiasAbiertoPromedio();
 
   // Mortalidad de crías: muertes en menores de 6 meses / nacimientos * 100
   const muertesNeonatos = await prisma.animal.count({
@@ -141,10 +141,20 @@ export async function obtenerResumenDashboard() {
       tasaMortalidadCrias: Math.round(tasaMortalidadCrias * 10) / 10,
       diasAbiertoPromedio: Math.round(diasAbiertoPromedio),
     },
+    // Operandos de cada indicador, para que el dashboard pueda mostrar el
+    // cálculo concreto que produjo cada número (leyenda de cada tarjeta).
+    detalleIndicadores: {
+      hembrasActivas: hembrasTotales,
+      gestacionesEnCurso: gestacionesActivas,
+      nacimientos,
+      desdeNacimientos: new Date(new Date().getFullYear() - 1, 0, 1),
+      muertesCrias: muertesNeonatos,
+      partosConsiderados,
+    },
   };
 }
 
-async function calcularDiasAbiertoPromedio(): Promise<number> {
+async function calcularDiasAbiertoPromedio(): Promise<{ promedio: number; partosConsiderados: number }> {
   // Calcula promedio de días entre último parto y fecha actual (o nueva gestación),
   // sobre la totalidad del historial de gestaciones finalizadas en parto.
   const gestacionesConParto = await prisma.gestacion.findMany({
@@ -156,7 +166,8 @@ async function calcularDiasAbiertoPromedio(): Promise<number> {
     orderBy: { fechaPartoEsperado: 'desc' },
   });
 
-  if (gestacionesConParto.length === 0) return 120; // Valor referencia para ganadería bovina
+  // Sin partos registrados se devuelve el valor de referencia para ganadería bovina
+  if (gestacionesConParto.length === 0) return { promedio: 120, partosConsiderados: 0 };
 
   const diasTotales = gestacionesConParto.reduce((acc, g) => {
     const diasDesdeUltimoParto = Math.max(
@@ -166,7 +177,7 @@ async function calcularDiasAbiertoPromedio(): Promise<number> {
     return acc + Math.min(diasDesdeUltimoParto, 365); // Máximo 1 año de cálculo
   }, 0);
 
-  return diasTotales / gestacionesConParto.length;
+  return { promedio: diasTotales / gestacionesConParto.length, partosConsiderados: gestacionesConParto.length };
 }
 
 export async function obtenerEvolucionMensual(anio: number) {

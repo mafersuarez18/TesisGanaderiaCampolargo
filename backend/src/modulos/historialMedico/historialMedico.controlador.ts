@@ -9,6 +9,7 @@ import {
   obtenerPrefillConsulta,
   finalizarTratamiento,
   actualizarPruebaComplementaria,
+  agregarPruebaComplementaria,
 } from './historialMedico.servicio';
 import {
   respuestaExito,
@@ -186,6 +187,16 @@ export async function controladorFinalizarTratamiento(
     const datos = esquemaFinalizarTratamiento.parse(req.body);
     const resultado = await finalizarTratamiento(req.params['id'] as string, datos);
     return respuestaExito(res, resultado);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorAgregarPrueba(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = esquemaPruebaComplementaria.parse(req.body);
+    const prueba = await agregarPruebaComplementaria(req.params['id'] as string, datos);
+    return respuestaCreado(res, prueba);
   } catch (error) { return next(error); }
 }
 

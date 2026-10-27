@@ -12,6 +12,7 @@
     "db:migrar": "prisma migrate dev",
     "db:migrar:prod": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
+    "db:datos-indicadores": "tsx prisma/datosPruebaIndicadores.ts",
     "db:reset": "prisma migrate reset --force && tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:generar": "prisma generate",

@@ -502,6 +502,30 @@ export async function finalizarTratamiento(tratamientoId: string, datos: DatosFi
   return { tratamientoId, animalId, nuevoEstadoSanitario };
 }
 
+/**
+ * Agrega una prueba complementaria a una consulta ya registrada (p. ej. un
+ * examen que el veterinario decide pedir después de la consulta). Igual que
+ * al crear la consulta, el resultado puede quedar en blanco y completarse
+ * luego con actualizarPruebaComplementaria.
+ */
+export async function agregarPruebaComplementaria(
+  historialMedicoId: string,
+  datos: { tipo: TipoPruebaComplementaria; fecha?: Date; resultado?: string; observaciones?: string },
+) {
+  const historial = await prisma.historialMedico.findUnique({ where: { id: historialMedicoId }, select: { id: true } });
+  if (!historial) throw new ErrorNoEncontrado(`Historial médico con id '${historialMedicoId}'`);
+
+  return prisma.pruebaComplementaria.create({
+    data: {
+      tipo:          datos.tipo,
+      fecha:         datos.fecha,
+      resultado:     datos.resultado?.trim() || null,
+      observaciones: datos.observaciones?.trim() || null,
+      historialMedicoId,
+    },
+  });
+}
+
 export interface DatosActualizarPruebaComplementaria {
   fecha?:         Date | null;
   resultado?:     string | null;

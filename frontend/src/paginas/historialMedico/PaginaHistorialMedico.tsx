@@ -701,12 +701,15 @@ export default function PaginaHistorialMedico() {
                 )}
 
                 {/* ── Pruebas complementarias ── */}
-                {historialSeleccionado.pruebasComplementarias.length > 0 && (
+                {(historialSeleccionado.pruebasComplementarias.length > 0 || tienePrivilegio('historial_medico.crear')) && (
                   <section>
                     <p className="text-[10px] uppercase font-semibold text-on-surface-variant tracking-wider mb-3 flex items-center gap-1.5">
                       <Icono nombre="biotech" clase="text-[14px]" /> Pruebas complementarias
                     </p>
                     <div className="space-y-2">
+                      {historialSeleccionado.pruebasComplementarias.length === 0 && (
+                        <p className="text-xs text-on-surface-variant italic">Esta consulta no tiene pruebas complementarias.</p>
+                      )}
                       {historialSeleccionado.pruebasComplementarias.map((p) => (
                         <TarjetaPruebaComplementaria
                           key={p.id}
@@ -721,6 +724,19 @@ export default function PaginaHistorialMedico() {
                           }}
                         />
                       ))}
+                      {tienePrivilegio('historial_medico.crear') && (
+                        <FormularioNuevaPrueba
+                          key={historialSeleccionado.id}
+                          historialId={historialSeleccionado.id}
+                          onAgregada={(nueva) => {
+                            setHistorialSeleccionado((h) => h && {
+                              ...h,
+                              pruebasComplementarias: [...h.pruebasComplementarias, nueva],
+                            });
+                            queryClient.invalidateQueries({ queryKey: ['historialMedico'] });
+                          }}
+                        />
+                      )}
                     </div>
                   </section>
                 )}
@@ -1015,7 +1031,13 @@ function TarjetaPruebaComplementaria({
             ? <p className="text-xs text-on-surface-variant whitespace-pre-line">{prueba.resultado}</p>
             : <p className="text-xs text-on-surface-variant italic">Sin resultado registrado</p>}
           {prueba.observaciones && <p className="text-xs text-on-surface-variant mt-1">{prueba.observaciones}</p>}
-          {puedeEditar && (
+          {prueba.id.startsWith(PREFIJO_PRUEBA_PENDIENTE) && (
+            <p className="mt-2 flex items-center gap-1 text-xs text-amber-700">
+              <Icono nombre="cloud_upload" clase="text-[14px]" />
+              Guardada sin conexión: se podrá editar cuando se sincronice.
+            </p>
+          )}
+          {puedeEditar && !prueba.id.startsWith(PREFIJO_PRUEBA_PENDIENTE) && (
             <button type="button" onClick={abrirEdicion}
               className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline">
               <Icono nombre={prueba.resultado ? 'edit' : 'add'} clase="text-[14px]" />
@@ -1024,6 +1046,96 @@ function TarjetaPruebaComplementaria({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// Prueba agregada sin conexión: queda en la cola offline y todavía no tiene
+// id del servidor, así que no se puede editar hasta que se sincronice.
+const PREFIJO_PRUEBA_PENDIENTE = 'pendiente-';
+
+// Agrega una prueba complementaria a una consulta ya registrada, desde el
+// panel de detalle (p. ej. un examen que se decidió pedir después).
+function FormularioNuevaPrueba({
+  historialId, onAgregada,
+}: {
+  historialId: string;
+  onAgregada: (prueba: PruebaComplementaria) => void;
+}) {
+  const vacia = { tipo: 'HEMATOLOGIA', fecha: new Date().toISOString().split('T')[0], resultado: '', observaciones: '' };
+  const [abierto, setAbierto] = useState(false);
+  const [datos, setDatos] = useState(vacia);
+
+  const mutacion = useMutation({
+    mutationFn: () =>
+      clienteHttp
+        .post(`/historial-medico/${historialId}/pruebas-complementarias`, {
+          tipo: datos.tipo,
+          fecha: datos.fecha ? new Date(datos.fecha).toISOString() : undefined,
+          resultado: datos.resultado || undefined,
+          observaciones: datos.observaciones || undefined,
+        }, { descripcionOffline: 'Prueba complementaria' })
+        .then((r) => (r.data.datos as PruebaComplementaria | null) ?? {
+          id: `${PREFIJO_PRUEBA_PENDIENTE}${Date.now()}`,
+          tipo: datos.tipo,
+          fecha: datos.fecha ? new Date(datos.fecha).toISOString() : null,
+          resultado: datos.resultado.trim() || null,
+          observaciones: datos.observaciones.trim() || null,
+        }),
+    onSuccess: (nueva) => {
+      onAgregada(nueva);
+      setDatos(vacia);
+      setAbierto(false);
+    },
+  });
+
+  if (!abierto) {
+    return (
+      <button type="button" onClick={() => { mutacion.reset(); setAbierto(true); }}
+        className="w-full flex items-center justify-center gap-2 py-2 border border-dashed border-primary/40 rounded-xl text-sm text-primary hover:bg-primary/5 transition-colors">
+        <Icono nombre="add" clase="text-[16px]" /> Agregar prueba complementaria
+      </button>
+    );
+  }
+
+  return (
+    <div className="p-3 rounded-xl bg-surface-container border border-primary/30 space-y-2">
+      <p className="text-sm font-medium text-on-surface">Nueva prueba complementaria</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <CampoLabel etiqueta="Tipo de prueba" req>
+          <select value={datos.tipo} onChange={(e) => setDatos((d) => ({ ...d, tipo: e.target.value }))}
+            className="campo-entrada text-sm">
+            {Object.entries(ETIQUETAS_TIPO_PRUEBA).map(([valor, etiqueta]) => (
+              <option key={valor} value={valor}>{etiqueta}</option>
+            ))}
+          </select>
+        </CampoLabel>
+        <CampoLabel etiqueta="Fecha">
+          <CampoFecha value={datos.fecha} onChange={(valor) => setDatos((d) => ({ ...d, fecha: valor }))} className="text-sm" />
+        </CampoLabel>
+      </div>
+      <CampoLabel etiqueta="Resultado">
+        <textarea value={datos.resultado} onChange={(e) => setDatos((d) => ({ ...d, resultado: e.target.value }))} rows={2}
+          placeholder="Ej: Dentro de rango, hematocrito 35%..." className="campo-entrada text-sm resize-none" />
+        <p className="text-[11px] text-on-surface-variant mt-1">
+          Si el laboratorio aún no lo entrega, déjelo en blanco y regístrelo después.
+        </p>
+      </CampoLabel>
+      <CampoLabel etiqueta="Observaciones">
+        <input type="text" value={datos.observaciones} onChange={(e) => setDatos((d) => ({ ...d, observaciones: e.target.value }))}
+          className="campo-entrada text-sm" />
+      </CampoLabel>
+      {mutacion.isError && (
+        <p className="text-xs text-error">No se pudo agregar la prueba. Intente de nuevo.</p>
+      )}
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setAbierto(false)} disabled={mutacion.isPending}
+          className="flex-1 boton boton-secundario text-sm py-1.5">Cancelar</button>
+        <button type="button" onClick={() => mutacion.mutate()} disabled={mutacion.isPending}
+          className="flex-1 boton boton-primario text-sm py-1.5">
+          {mutacion.isPending ? 'Guardando...' : 'Agregar prueba'}
+        </button>
+      </div>
     </div>
   );
 }

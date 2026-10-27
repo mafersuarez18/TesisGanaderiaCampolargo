@@ -62,20 +62,24 @@ export function crearApp(): Application {
   // solo el polling de notificaciones (cada 30s) ya consume ~30 cada 15 min,
   // y con varios usuarios detrás del mismo IP (oficina/finca) más los
   // reintentos de la cola offline al recuperar señal, se agotaba con
-  // facilidad en una sesión de uso real, no solo en un ataque.
+  // facilidad en una sesión de uso real, no solo en un ataque. Además, la
+  // precarga offline al iniciar sesión hace ~110 peticiones por usuario, así
+  // que 500 se agotaba con solo unos pocos inicios de sesión desde la finca.
   const limitadorGlobal = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 500,
+    max: 5000,
     message: { exito: false, mensaje: 'Demasiadas peticiones. Intente de nuevo en 15 minutos.' },
     standardHeaders: true,
     legacyHeaders: false,
   });
 
   // El login es un blanco típico de fuerza bruta, así que tiene un límite
-  // mucho más ajustado que el resto de la API.
+  // mucho más ajustado que el resto de la API. Solo cuentan los intentos
+  // fallidos: varios usuarios entrando bien desde el mismo IP no se bloquean.
   const limitadorAutenticacion = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
+    skipSuccessfulRequests: true,
     message: { exito: false, mensaje: 'Demasiados intentos de inicio de sesión. Intente de nuevo en 15 minutos.' },
   });
 

@@ -125,7 +125,7 @@ export default function PaginaLogin() {
           {/* Logo — siempre visible encima del formulario */}
           <div className="flex items-center gap-3 mb-8">
             <div className="w-14 h-14 rounded-2xl bg-white shadow-md flex items-center justify-center overflow-hidden border border-outline-variant/40 flex-shrink-0">
-              <img src="/logo-campolargo.png" alt="Logo LinajeApp" className="w-full h-full object-contain" />
+              <img src="/logo-ganaderia-campolargo.png" alt="Logo Ganadería Campolargo" className="w-full h-full object-contain p-0.5" />
             </div>
             <div>
               <p className="font-bold text-on-surface text-base leading-tight">LinajeApp</p>

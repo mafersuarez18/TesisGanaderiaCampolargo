@@ -3,34 +3,46 @@
   Sistema de Gestión Veterinaria - Sucesión Joao Campolargo
 ===============================================================
 
+En esta guía, "la carpeta del proyecto" es donde se clonó el repositorio,
+por ejemplo:
+  C:\Users\MariaFernandaSuarezD\Desktop\Tesis\GanaderiaCampolargo
+
+
 ANTES DE EMPEZAR - LO QUE NECESITAS TENER INSTALADO
 -----------------------------------------------------
-- Node.js versión 24 o superior
+- Node.js versión 24.14 o superior   (comprobar con: node --version)
 - PostgreSQL corriendo en tu computadora (puerto 5432)
 
-Si la base de datos "campolargo" no existe todavía, ábrela desde pgAdmin o
+Si la base de datos "campolargo" no existe todavía, créala desde pgAdmin o
 ejecuta esto en una terminal:
   psql -U postgres -c "CREATE DATABASE campolargo;"
+
+(psql está en C:\Program Files\PostgreSQL\<versión>\bin si no lo reconoce
+la terminal.)
 
 
 ╔══════════════════════════════════════════════════════════════╗
 ║  PASO 0 — CREAR LOS ARCHIVOS .env (SOLO LA PRIMERA VEZ)     ║
 ╚══════════════════════════════════════════════════════════════╝
 
-El sistema necesita DOS archivos .env para funcionar.
-Estos archivos guardan las contraseñas y claves del sistema.
-NUNCA deben subirse a GitHub ni compartirse.
+El sistema necesita DOS archivos .env para funcionar. Guardan las
+contraseñas y claves del sistema. NUNCA deben subirse a GitHub ni
+compartirse. Cada carpeta trae una plantilla para copiar:
+
+  backend\.env.ejemplo   →  copiar como  backend\.env
+  frontend\.env.ejemplo  →  copiar como  frontend\.env
 
 ──────────────────────────────────────────────────────────────
   ARCHIVO 1: backend\.env
 ──────────────────────────────────────────────────────────────
-Crea el archivo C:\Users\MariaFernandaSuarezD\Documents\Tesis\backend\.env
-con este contenido (ya ajustado para tu computadora):
+Contenido mínimo (cambia TU_CONTRASEÑA por la contraseña de tu usuario
+postgres):
 
-  DATABASE_URL="postgresql://postgres:30015773@localhost:5432/campolargo"
-  BACKEND_PUERTO=3001
-  JWT_SECRETO=clave_secreta_aleatoria_minimo_32_caracteres_cambiar
-  JWT_SECRETO_REFRESH=otra_clave_diferente_minimo_32_caracteres_cambiar
+  DATABASE_URL="postgresql://postgres:TU_CONTRASEÑA@localhost:5432/campolargo"
+  DIRECT_URL="postgresql://postgres:TU_CONTRASEÑA@localhost:5432/campolargo"
+  PUERTO=3001
+  JWT_SECRETO=clave_secreta_aleatoria_minimo_32_caracteres
+  JWT_SECRETO_REFRESH=otra_clave_diferente_minimo_32_caracteres
   JWT_EXPIRACION=15m
   JWT_EXPIRACION_REFRESH=7d
   NODE_ENV=development
@@ -46,14 +58,11 @@ con este contenido (ya ajustado para tu computadora):
   EMAIL_PUERTO=587
   EMAIL_USUARIO=tu_correo@gmail.com
   EMAIL_CLAVE=clave_de_aplicacion_gmail
-  EMAIL_REMITENTE=noreply@campolargo.com
+  EMAIL_REMITENTE=tu_correo@gmail.com
 
 ──────────────────────────────────────────────────────────────
   ARCHIVO 2: frontend\.env
 ──────────────────────────────────────────────────────────────
-Crea el archivo C:\Users\MariaFernandaSuarezD\Documents\Tesis\frontend\.env
-con este contenido:
-
   VITE_API_URL=http://localhost:3001/api
 
   IMPORTANTE: Las variables del frontend DEBEN empezar con VITE_
@@ -64,9 +73,12 @@ con este contenido:
 ──────────────────────────────────────────────────────────────
   DATABASE_URL          → Cadena de conexión a PostgreSQL.
                           Formato: postgresql://usuario:contraseña@host:puerto/base_datos
-                          Cambia "postgres:30015773" si tu usuario o contraseña son diferentes.
 
-  BACKEND_PUERTO        → Puerto donde corre el servidor Express (3001 por defecto)
+  DIRECT_URL            → Conexión directa que usa Prisma para las migraciones.
+                          OBLIGATORIA: sin ella Prisma falla con el error P1012.
+                          En tu computadora va igual que DATABASE_URL.
+
+  PUERTO                → Puerto donde corre el servidor Express (3001 por defecto).
 
   JWT_SECRETO           → Clave privada para firmar los tokens de acceso.
                           Mínimo 32 caracteres, completamente aleatoria.
@@ -82,59 +94,78 @@ con este contenido:
   VITE_API_URL          → Dirección donde el frontend busca la API del backend.
                           Si cambias el puerto del backend, actualiza esto también.
 
+  NOTA: el archivo .env.ejemplo de la RAÍZ del proyecto es solo para
+  levantar el sistema con Docker. Para correrlo normalmente no hace falta.
+
 
 PASO 1 - INSTALAR LAS DEPENDENCIAS (solo la primera vez)
 ---------------------------------------------------------
-Abre una terminal (PowerShell o CMD) y ejecuta estos comandos EN ORDEN:
+Abre una terminal (PowerShell) en la carpeta del proyecto y ejecuta:
 
-  cd C:\Users\MariaFernandaSuarezD\Documents\Tesis
   npm install --legacy-peer-deps
+
+Esto instala el backend y el frontend a la vez. Luego:
 
   cd backend
   npx prisma generate
-
-Luego instala también las dependencias locales del frontend:
-  cd ..\frontend
-  npm install --legacy-peer-deps
 
 Espera a que todo termine. Puede tardar unos minutos.
 
 
 PASO 2 - CREAR LAS TABLAS EN LA BASE DE DATOS (solo la primera vez)
 --------------------------------------------------------------------
-En la terminal del BACKEND ejecuta:
-  npx prisma migrate dev --name inicio
+En la carpeta backend ejecuta:
 
-Esto lee el archivo schema.prisma y crea TODAS las tablas en tu base de datos
-automáticamente. Verás mensajes como "Applying migration..." - eso es normal.
+  npx prisma migrate deploy
+
+Esto aplica todas las migraciones del proyecto y crea TODAS las tablas.
+Al final verás: "All migrations have been successfully applied."
+
+  OJO: no uses "npx prisma migrate dev --name inicio" para instalar: ese
+  comando crea una migración nueva en lugar de aplicar las que ya existen.
 
 
 PASO 3 - CARGAR DATOS DE PRUEBA (solo la primera vez)
 ------------------------------------------------------
-Todavía en la terminal del BACKEND ejecuta:
+Todavía en la carpeta backend ejecuta:
+
   npm run db:seed
 
-Esto carga datos reales de la empresa:
-- Las 3 fincas (La Esperanza, San Antonio, El Palmar)
+Esto carga:
+- Las 3 fincas (El Paraíso, Campo Alegre, Las Peñas) con sus lotes y potreros
 - Razas de ganado (Brahman, Senepol, Cebú, etc.)
-- Animales de ejemplo
-- Un usuario administrador para entrar al sistema
-- Calendarios de vacunación
-- Reglas de alertas automáticas
+- Animales de ejemplo, historiales médicos, vacunaciones y vitaminas
+- Sementales, inventario de semen y eventos reproductivos
+- Usuarios para entrar al sistema (administrador, veterinario y técnico)
+- Calendarios de vacunación, reglas de alertas y notificaciones
+- Dispositivos GPS con posiciones de prueba
 
-Al terminar verás algo como: "Datos cargados exitosamente"
+Al terminar verás: "✓ Seed completado exitosamente".
+Si lo vuelves a ejecutar no duplica nada.
+
+OPCIONAL - más datos para los indicadores del dashboard:
+
+  npm run db:datos-indicadores
+
+Agrega gestaciones, partos con sus crías y consultas con diagnósticos y
+tratamientos de este año, para que la tasa de preñez, natalidad,
+mortalidad de crías, días abiertos, animales tratados y recurrencia de
+patologías muestren valores realistas. Se puede ejecutar las veces que
+quieras (reemplaza la tanda anterior). Para quitar esos datos:
+
+  npm run db:datos-indicadores -- --limpiar
 
 
 PASO 4 - INICIAR EL SISTEMA
 ----------------------------
-Necesitas las DOS terminales corriendo al mismo tiempo.
+Necesitas DOS terminales corriendo al mismo tiempo.
 
-En la terminal del BACKEND:
+En la terminal del BACKEND (carpeta backend):
   npm run dev
 
 Verás: "Servidor iniciado en el puerto 3001" - eso significa que la API está lista.
 
-En la terminal del FRONTEND:
+En la terminal del FRONTEND (carpeta frontend):
   npm run dev
 
 Verás algo como: "Local: http://localhost:5173" - esa es la dirección del sistema.
@@ -163,34 +194,88 @@ CREDENCIALES PARA ENTRAR
     Contraseña: Campolargo2026!
 
 
+USO SIN CONEXIÓN
+-----------------
+- Al iniciar sesión, el sistema descarga en segundo plano los datos de
+  todas las pantallas. Cuando aparece "Listo: la app ya se puede usar sin
+  conexión.", ya se puede trabajar sin señal.
+- Sin conexión se ven los últimos datos guardados, y lo que se registre
+  (animales, consultas, vacunas...) queda guardado en el dispositivo. El
+  indicador de la barra superior muestra cuántos registros están
+  pendientes, y se suben solos cuando vuelve la señal.
+- Los reportes PDF/Excel necesitan conexión.
+- Al cerrar sesión se borran del dispositivo los datos guardados.
+
+Para probarlo como aplicación instalable (PWA) en el teléfono hay que
+compilar el frontend y servirlo por HTTPS:
+  cd frontend
+  npm run construir
+  npm run previsualizar
+y exponer el puerto 4173 con un túnel HTTPS (por ejemplo cloudflared).
+
+
+RESPALDO Y RESTAURACIÓN DE LA BASE DE DATOS
+--------------------------------------------
+Estos comandos están en C:\Program Files\PostgreSQL\<versión>\bin.
+
+CREAR UN RESPALDO (guarda todo: tablas, datos y migraciones):
+  pg_dump -U postgres -h localhost -Fc -d campolargo -f respaldo_campolargo.dump
+
+RESTAURAR EN UNA BASE DE DATOS NUEVA:
+  createdb -U postgres -h localhost campolargo
+  pg_restore -U postgres -h localhost --no-owner -d campolargo respaldo_campolargo.dump
+
+REEMPLAZAR LA BASE DE DATOS ACTUAL POR UN RESPALDO:
+  ¡CUIDADO! Esto borra la base de datos actual. Haz un respaldo antes.
+  dropdb -U postgres -h localhost campolargo
+  createdb -U postgres -h localhost campolargo
+  pg_restore -U postgres -h localhost --no-owner -d campolargo respaldo_campolargo.dump
+
+DESPUÉS DE RESTAURAR, comprueba las migraciones (en la carpeta backend):
+  npx prisma migrate status
+Si dice que faltan migraciones (el respaldo es más viejo que el código):
+  npx prisma migrate deploy
+
+EMPEZAR DE CERO (borra TODO y vuelve a cargar los datos de prueba):
+  cd backend
+  npm run db:reset
+
+
 QUÉ HACER SI ALGO FALLA
 ------------------------
 
 ERROR: "Cannot connect to database" o "P1001"
-  - Verifica que PostgreSQL esté corriendo (busca el servicio en el Administrador de tareas)
+  - Verifica que PostgreSQL esté corriendo (servicio "postgresql-x64-..." en
+    Servicios de Windows)
   - Verifica que la base de datos "campolargo" exista en pgAdmin
   - Abre backend\.env y confirma que DATABASE_URL tenga el usuario y contraseña correctos
-  - El formato debe ser: postgresql://postgres:TU_CONTRASEÑA@localhost:5432/campolargo
 
-ERROR: "Invalid JWT secret" o errores de autenticación
-  - Verifica que backend\.env tenga JWT_SECRETO y JWT_SECRETO_REFRESH con valores (no vacíos)
-  - Deben tener al menos 32 caracteres cada uno
+ERROR: "Environment variable not found: DIRECT_URL" (P1012)
+  - Falta DIRECT_URL en backend\.env. Agrégala con el mismo valor que DATABASE_URL.
+
+ERROR: "Variables de entorno inválidas" al iniciar el backend
+  - El mensaje indica qué variable falta. Lo más común: JWT_SECRETO o
+    JWT_SECRETO_REFRESH vacíos o con menos de 32 caracteres.
 
 ERROR: "Port 3001 already in use"
   - Algún proceso ya está usando ese puerto
   - Ejecuta: netstat -ano | findstr :3001
   - Luego cierra ese proceso desde el Administrador de tareas
 
-ERROR: "VITE_API_URL is undefined" o frontend no puede conectar al backend
-  - Verifica que el archivo frontend\.env exista y tenga: VITE_API_URL=http://localhost:3001/api
-  - Asegúrate de que el nombre empiece con VITE_ (mayúsculas)
+ERROR: el frontend no puede conectar al backend
+  - Verifica que frontend\.env exista y tenga: VITE_API_URL=http://localhost:3001/api
+  - Asegúrate de que el backend esté corriendo
   - Reinicia el servidor de Vite después de cambiar el .env
 
 ERROR: "Module not found" o errores de TypeScript
-  - Vuelve a ejecutar npm install en la carpeta que da error
+  - Vuelve a ejecutar npm install --legacy-peer-deps en la carpeta del proyecto
 
 ERROR: "Prisma Client not generated"
   - Ejecuta en backend: npx prisma generate
+
+ERROR: "Demasiadas peticiones. Intente de nuevo en 15 minutos."
+  - La API limita a 5000 peticiones cada 15 minutos por IP (10 intentos
+    fallidos de inicio de sesión). Espera o reinicia el backend.
 
 ERROR en el frontend: pantalla en blanco
   - Abre las herramientas del desarrollador (F12) y mira la consola
@@ -201,18 +286,22 @@ ESTRUCTURA DEL SISTEMA
 -----------------------
 El sistema tiene estas secciones en el menú:
 
-  Dashboard     → Resumen general, indicadores clave, alertas y partos próximos
+  Dashboard     → Resumen general, indicadores reproductivos y clínicos, alertas y partos próximos
   Fincas        → Las 3 fincas con panel de detalle que muestra todos sus animales
+  Lotes         → Agrupaciones de animales dentro de cada finca
   Animales      → Todo el hato bovino, búsqueda, filtros y ficha de cada animal
-  Historial Méd → Consultas veterinarias, diagnósticos y tratamientos
-  Vacunación    → Calendarios de vacunación y registro de aplicaciones
+  Historial Méd → Consultas veterinarias, diagnósticos, tratamientos, vitaminas
+                  y pruebas complementarias (el resultado se puede registrar después)
+  Vacunación    → Calendarios de vacunación y desparasitación, y registro de aplicaciones
   Reproducción  → Gestaciones, partos próximos y eventos reproductivos
   Inseminación  → Laboratorio de inseminación artificial y sementales
-  Mapa GPS      → Dispositivos de rastreo y ubicación de animales
+  Geolocalización → Dispositivos de rastreo y ubicación de animales
   Alertas       → Notificaciones automáticas del sistema
   Reportes      → Descarga de reportes en PDF y Excel
-  Seguridad     → Gestión de usuarios y contraseñas
+  Seguridad     → Gestión de usuarios, roles y contraseñas
   Auditoría     → Historial completo de acciones en el sistema
+
+  (El módulo Plan Sanitario existe en el backend pero está oculto en el menú.)
 
 
 DIRECCIÓN DE LA API (para referencia técnica)
@@ -223,11 +312,14 @@ DIRECCIÓN DE LA API (para referencia técnica)
 
 ARCHIVOS IMPORTANTES
 --------------------
-  backend\.env              → URL base de datos + claves JWT (NO compartir)
-  frontend\.env             → URL de la API para el frontend (NO compartir)
-  .env.ejemplo              → Plantilla con TODAS las variables documentadas
+  backend\.env                 → URL base de datos + claves JWT (NO compartir)
+  frontend\.env                → URL de la API para el frontend (NO compartir)
+  backend\.env.ejemplo         → Plantilla de backend\.env
+  frontend\.env.ejemplo        → Plantilla de frontend\.env
+  .env.ejemplo                 → Plantilla de variables para Docker
   backend\prisma\schema.prisma → Definición de toda la base de datos
   backend\prisma\seed.ts       → Datos de prueba que se cargan al inicio
+  backend\prisma\datosPruebaIndicadores.ts → Datos extra para los indicadores
   README.md                    → Documentación técnica completa del sistema
 
 ===============================================================
