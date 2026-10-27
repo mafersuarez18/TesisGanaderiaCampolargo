@@ -1,5 +1,5 @@
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { EstadoAnimal, EstadoSanitario, PrioridadAlerta, EstadoGestacion } from '@prisma/client';
+import { EstadoAnimal, EstadoSanitario, PrioridadAlerta, EstadoGestacion, EstadoCria } from '@prisma/client';
 
 // Indicadores agregados para el dashboard y los reportes analíticos: todo
 // lo que aquí se calcula son cifras de solo lectura derivadas de otros
@@ -109,15 +109,24 @@ export async function obtenerResumenDashboard() {
   // Días abiertos: promedio de tiempo entre parto y nueva gestación (simplificado)
   const { promedio: diasAbiertoPromedio, partosConsiderados } = await calcularDiasAbiertoPromedio();
 
-  // Mortalidad de crías: muertes en menores de 6 meses / nacimientos * 100
-  const muertesNeonatos = await prisma.animal.count({
-    where: {
-      estado: EstadoAnimal.MUERTO,
-      fechaNacimiento: {
-        gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+  // Mortalidad de crías: animales muertos nacidos en el último año, más las
+  // crías que nacieron muertas (o murieron en sus primeras 24 h) según el
+  // registro del parto y que nunca se dieron de alta como animal — sin
+  // criaId, para no contar dos veces a una cría registrada.
+  const haceUnAnio = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+  const [animalesMuertos, criasNacidasMuertas] = await Promise.all([
+    prisma.animal.count({
+      where: { estado: EstadoAnimal.MUERTO, fechaNacimiento: { gte: haceUnAnio } },
+    }),
+    prisma.nacimiento.count({
+      where: {
+        estadoCria: { in: [EstadoCria.MUERTO_AL_NACER, EstadoCria.MUERTO_NEONATAL] },
+        criaId: null,
+        fechaNacimiento: { gte: haceUnAnio },
       },
-    },
-  });
+    }),
+  ]);
+  const muertesNeonatos = animalesMuertos + criasNacidasMuertas;
 
   const tasaMortalidadCrias = nacimientos > 0
     ? (muertesNeonatos / nacimientos) * 100

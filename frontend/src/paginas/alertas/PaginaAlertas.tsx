@@ -7,6 +7,8 @@ import { BadgePrioridad } from '../../componentes/ui/Badge';
 import Paginacion from '../../componentes/ui/Paginacion';
 import Icono from '../../componentes/ui/Icono';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
+import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
+import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/reproduccion/ModalResultadoParto';
 import toast from 'react-hot-toast';
 
 // Panel de notificaciones generadas por el motor de alertas: resumen por
@@ -82,7 +84,11 @@ const ETIQUETA_TIPO: Record<string, string> = {
   EnfermedadDiagnosticada: 'Enfermedad',
   InventarioSemen:         'Inventario semen',
   Tratamiento:             'Tratamiento',
+  EventoReproductivo:      'Inseminación / Monta',
 };
+
+// "Revisar inseminación — Lucero" → "Lucero"
+const sujetoDeTitulo = (titulo: string) => titulo.split(' — ').slice(1).join(' — ') || titulo;
 
 const ETIQUETA_TIPO_ALERTA: Record<string, string> = {
   VACUNA_VENCIDA:                       'Vacuna vencida',
@@ -110,6 +116,9 @@ export default function PaginaAlertas() {
   const [tipoFiltro, setTipoFiltro]       = useState<string>('');
   const [reglaEliminar, setReglaEliminar] = useState<ReglaAlerta | null>(null);
   const [modalRegla, setModalRegla]       = useState<ReglaAlerta | null | 'nueva'>(null);
+  const [servicioAConfirmar, setServicioAConfirmar] = useState<ServicioAConfirmar | null>(null);
+  const [prenadaInicial, setPrenadaInicial]         = useState(true);
+  const [gestacionACerrar, setGestacionACerrar]     = useState<GestacionACerrar | null>(null);
   const [evaluando, setEvaluando]         = useState(false);
 
   // ── Consultas ───────────────────────────────────────────────────────────────
@@ -546,6 +555,37 @@ export default function PaginaAlertas() {
                               </button>
                             </div>
                           )}
+                          {notif.entidadTipo === 'EventoReproductivo' && !notif.leida && notif.entidadId && (
+                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                              <span className="text-xs font-medium text-on-surface-variant">¿Quedó preñada?</span>
+                              {[
+                                { prenada: true,  et: 'Sí, preñada', clase: 'bg-primary/10 text-primary hover:bg-primary/20' },
+                                { prenada: false, et: 'No, vacía',   clase: 'bg-error-container text-on-error-container hover:opacity-80' },
+                              ].map((op) => (
+                                <button
+                                  key={op.et}
+                                  onClick={() => {
+                                    setPrenadaInicial(op.prenada);
+                                    setServicioAConfirmar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) });
+                                  }}
+                                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${op.clase}`}
+                                >
+                                  {op.et}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {notif.entidadTipo === 'Gestacion' && !notif.leida && notif.entidadId && (
+                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                              <span className="text-xs font-medium text-on-surface-variant">¿Ya parió?</span>
+                              <button
+                                onClick={() => setGestacionACerrar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) })}
+                                className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                              >
+                                Registrar resultado del parto
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <span className="text-[10px] text-outline whitespace-nowrap flex-shrink-0">
                           {tiempoRelativo(notif.creadoEn)}
@@ -680,6 +720,14 @@ export default function PaginaAlertas() {
         variante="peligro"
         cargando={mutEliminarRegla.isPending}
       />
+
+      {/* ── Seguimiento reproductivo desde las alertas ───────────────────────── */}
+      <ModalConfirmarServicio
+        servicio={servicioAConfirmar}
+        prenadaInicial={prenadaInicial}
+        alCerrar={() => setServicioAConfirmar(null)}
+      />
+      <ModalResultadoParto gestacion={gestacionACerrar} alCerrar={() => setGestacionACerrar(null)} />
     </div>
   );
 }
@@ -869,9 +917,13 @@ function ModalRegla({
   });
   const [error, setError] = useState('');
 
+  // Bajo la clave 'usuarios' para que crear o editar un usuario en Seguridad
+  // invalide también esta lista, y siempre se vuelve a pedir al abrir el
+  // formulario para que un usuario recién creado aparezca como destinatario.
   const { data: usuariosDisponibles = [] } = useQuery<UsuarioOpcion[]>({
-    queryKey: ['usuarios-catalogo'],
+    queryKey: ['usuarios', 'catalogo'],
     queryFn: () => clienteHttp.get('/usuarios').then((r) => r.data.datos),
+    staleTime: 0,
   });
 
   const alternarUsuario = (usuarioId: string) => {

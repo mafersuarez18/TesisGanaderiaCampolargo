@@ -11,6 +11,7 @@ import Icono from '../../componentes/ui/Icono';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
+import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 
 // Consultas médicas: listado, formulario de nueva consulta (con
 // enfermedades/tratamientos/desparasitaciones anidados) y su selector de
@@ -1071,14 +1072,14 @@ function FormularioNuevaPrueba({
       clienteHttp
         .post(`/historial-medico/${historialId}/pruebas-complementarias`, {
           tipo: datos.tipo,
-          fecha: datos.fecha ? new Date(datos.fecha).toISOString() : undefined,
+          fecha: datos.fecha ? isoMediodia(datos.fecha) : undefined,
           resultado: datos.resultado || undefined,
           observaciones: datos.observaciones || undefined,
         }, { descripcionOffline: 'Prueba complementaria' })
         .then((r) => (r.data.datos as PruebaComplementaria | null) ?? {
           id: `${PREFIJO_PRUEBA_PENDIENTE}${Date.now()}`,
           tipo: datos.tipo,
-          fecha: datos.fecha ? new Date(datos.fecha).toISOString() : null,
+          fecha: datos.fecha ? isoMediodia(datos.fecha) : null,
           resultado: datos.resultado.trim() || null,
           observaciones: datos.observaciones.trim() || null,
         }),
@@ -1277,7 +1278,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
       if (ultimaDesparasitacion) {
         // Pre-cargar con el último registro — conservar la fecha original
         const fechaOriginal = ultimaDesparasitacion.fecha
-          ? new Date(ultimaDesparasitacion.fecha).toISOString().split('T')[0]
+          ? fechaLocalISO(new Date(ultimaDesparasitacion.fecha))
           : new Date().toISOString().split('T')[0];
         setForm((f) => ({
           ...f,
@@ -1310,7 +1311,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
     mutationFn: async (datos: FormHistorial) => {
       const payload: any = {
         animalId:      datos.animalId,
-        fechaConsulta: new Date(datos.fechaConsulta).toISOString(),
+        fechaConsulta: isoMediodia(datos.fechaConsulta),
         motivoConsulta: datos.motivoConsulta,
       };
       if (datos.sintomasObservados)  payload.sintomasObservados  = datos.sintomasObservados;
@@ -1354,7 +1355,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
           return {
             tipo: d.tipo,
             medicamentoId,
-            fecha: new Date(d.fecha).toISOString(),
+            fecha: isoMediodia(d.fecha),
             dosis: d.dosis || undefined,
             via: d.via || undefined,
           };
@@ -1374,7 +1375,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
           }
           return {
             medicamentoId,
-            fecha: new Date(v.fecha).toISOString(),
+            fecha: isoMediodia(v.fecha),
             dosis: v.dosis || undefined,
             via: v.via || undefined,
           };
@@ -1383,7 +1384,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
       if (datos.pruebasComplementarias.length) {
         payload.pruebasComplementarias = datos.pruebasComplementarias.map((p) => ({
           tipo: p.tipo,
-          fecha: p.fecha ? new Date(p.fecha).toISOString() : undefined,
+          fecha: p.fecha ? isoMediodia(p.fecha) : undefined,
           resultado: p.resultado || undefined,
           observaciones: p.observaciones || undefined,
         }));
@@ -1392,7 +1393,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
         payload.enfermedades = datos.enfermedades.map((en) => ({
           nombreEnfermedad: en.nombreEnfermedad,
           nivelGravedad: en.nivelGravedad || undefined,
-          fechaInicio: new Date(en.fechaInicio).toISOString(),
+          fechaInicio: isoMediodia(en.fechaInicio),
           descripcionClinica: en.descripcionClinica || undefined,
           diagnosticoDefinitivo: en.diagnosticoDefinitivo || undefined,
           pronostico: en.pronostico || undefined,
@@ -1419,7 +1420,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
           return {
             medicamentoId,
             enfermedadDiagnosticadaId: t.enfermedadDiagnosticadaId || undefined,
-            fechaInicio: new Date(t.fechaInicio).toISOString(),
+            fechaInicio: isoMediodia(t.fechaInicio),
             dosis: t.dosis,
             viaAdministracion: t.viaAdministracion,
             frecuencia: t.frecuencia,

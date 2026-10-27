@@ -10,6 +10,7 @@ import {
   servicioEliminarAnimal,
   servicioListarRazas,
   servicioCrearRaza,
+  servicioListarCriasPorRegistrar,
 } from './animales.servicio';
 import {
   respuestaExito,
@@ -87,9 +88,21 @@ export async function controladorCrearAnimal(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const datos = esquemaCrearAnimal.parse(req.body);
+    // nacimientoId solo se acepta al crear (no en la edición, que usa
+    // esquemaCrearAnimal.partial()): enlaza la cría con su nacimiento.
+    const datos = esquemaCrearAnimal.extend({ nacimientoId: z.string().min(1).optional() }).parse(req.body);
     const animal = await servicioCrearAnimal(datos);
     return respuestaCreado(res, animal);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorCriasPorRegistrar(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const { fincaId } = z.object({ fincaId: z.string().min(1).optional() }).parse(req.query);
+    const crias = await servicioListarCriasPorRegistrar(fincaId);
+    return respuestaExito(res, crias);
   } catch (error) { return next(error); }
 }
 

@@ -130,7 +130,7 @@ function construirExplicaciones(
     },
     mortalidad: {
       titulo: 'Mortalidad de Crías',
-      descripcion: `Animales con estado Muerto nacidos en los últimos 365 días, en relación con los nacimientos registrados desde el ${desde}.`,
+      descripcion: `Crías muertas en los últimos 365 días (animales con estado Muerto más las crías que nacieron muertas o murieron en sus primeras 24 h según el registro del parto), en relación con los nacimientos registrados desde el ${desde}.`,
       formula: 'Crías muertas ÷ nacimientos × 100',
       calculo: d ? porcentaje(d.muertesCrias, d.nacimientos, 'Sin nacimientos registrados') : undefined,
     },
@@ -247,7 +247,7 @@ export default function PaginaDashboard() {
             cargando={isLoading}
           />
           <TarjetaKPI
-            icono="pregnant_woman"
+            icono="vaca_prenada"
             etiqueta="Partos (30 días)"
             explicacion={explicaciones.partos30}
             valor={resumen?.partosProximos30Dias}
@@ -406,7 +406,7 @@ export default function PaginaDashboard() {
           <div className="tarjeta-vidrio rounded-2xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm text-on-surface flex items-center gap-2">
-                <Icono nombre="pregnant_woman" clase="text-[18px] text-secondary" />
+                <Icono nombre="vaca_prenada" clase="text-[18px] text-secondary" />
                 Partos Próximos
               </h3>
               <Link to="/reproduccion" className="text-xs text-primary hover:underline flex items-center gap-0.5">

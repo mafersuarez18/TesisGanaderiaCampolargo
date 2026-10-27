@@ -13,6 +13,7 @@ import {
   controladorEliminarAnimal,
   controladorListarRazas,
   controladorCrearRaza,
+  controladorCriasPorRegistrar,
 } from './animales.controlador';
 
 const enrutador = Router();
@@ -33,6 +34,10 @@ enrutador.post(
   registrarAuditoria('Registrar raza', 'Raza'),
   controladorCrearRaza,
 );
+
+// GET /api/animales/crias-por-registrar — crías vivas nacidas en un parto
+// registrado que todavía no se dieron de alta como animales
+enrutador.get('/crias-por-registrar', requerirPrivilegio('animales.ver'), controladorCriasPorRegistrar);
 
 // GET /api/animales/arete/:arete
 enrutador.get('/arete/:arete', requerirPrivilegio('animales.ver'), controladorBuscarPorArete);

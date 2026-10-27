@@ -8,10 +8,16 @@ import Paginacion from '../../componentes/ui/Paginacion';
 import Icono from '../../componentes/ui/Icono';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
+import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
+import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/reproduccion/ModalResultadoParto';
+import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
+import { isoMediodia } from '../../servicios/fechas';
 
-// Ciclo reproductivo: partos próximos, eventos (celo, monta, diagnóstico
-// de gestación, parto...) y gestiones activas, incluyendo el cierre de una
-// gestación (parto/aborto/pérdida).
+// Ciclo reproductivo: servicios (inseminación/monta) por confirmar, partos
+// próximos, eventos (celo, monta, diagnóstico de gestación, parto...) e
+// indicadores. El seguimiento va así: servicio → a los 21 días se confirma
+// si quedó preñada (abre la gestación) → al llegar la fecha de parto se
+// registra cómo salió (cierra la gestación).
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -19,10 +25,15 @@ interface EventoReproductivo {
   id: string;
   tipo: string;
   fecha: string;
+  descripcion?: string;
   observaciones?: string;
   animal: { id: string; numeroIdentificacion: string; nombre?: string; lote?: { finca?: { nombre: string } } };
   registradoPor: { nombre: string; apellido: string };
 }
+
+// Descripciones que indican una pérdida (cría muerta, aborto, pérdida de la
+// gestación), para resaltarlas en el historial.
+const esDescripcionDePerdida = (d?: string) => !!d && /muert|murió|pérdida|aborto/i.test(d);
 
 interface PartoProximo {
   id: string;
@@ -32,7 +43,24 @@ interface PartoProximo {
   finca: string;
   fechaPartoEsperado: string;
   diasRestantes: number;
-  clasificacion: 'urgente' | 'proximo' | 'futuro';
+  clasificacion: 'vencido' | 'urgente' | 'proximo' | 'futuro';
+}
+
+interface ServicioPorConfirmar {
+  id: string;
+  tipo: 'INSEMINACION_ARTIFICIAL' | 'MONTA_NATURAL';
+  fecha: string;
+  observaciones?: string;
+  animal: { id: string; numeroIdentificacion: string; nombre?: string; lote?: { finca?: { nombre: string } } };
+  semental: string | null;
+  numeroIntento: number | null;
+  diasTranscurridos: number;
+  fechaRevision: string;
+  listoParaRevisar: boolean;
+}
+
+function nombreAnimal(numero: string, nombre?: string | null) {
+  return `#${numero}${nombre ? ` · ${nombre}` : ''}`;
 }
 
 interface RespuestaEventos {
@@ -72,7 +100,7 @@ const TIPO_EVENTO: Record<string, { etiqueta: string; icono: string; colorVarian
   DESTETE:                 { etiqueta: 'Destete',             icono: 'water_drop',     colorVariante: 'amarillo' },
   DESCARTE_REPRODUCTIVO:   { etiqueta: 'Descarte Reprod.',    icono: 'remove_circle',  colorVariante: 'rojo' },
   // Alias para gestación (usa endpoint separado)
-  GESTACION:               { etiqueta: 'Gestación',           icono: 'pregnant_woman', colorVariante: 'morado' },
+  GESTACION:               { etiqueta: 'Gestación',           icono: 'vaca_prenada', colorVariante: 'morado' },
 };
 
 const TIPOS_PARA_FILTRO = [
@@ -85,19 +113,33 @@ const TIPOS_PARA_FILTRO = [
 export default function PaginaReproduccion() {
   const navegar = useNavigate();
   const queryClient = useQueryClient();
-  const [pestana, setPestana]         = useState<'partos' | 'eventos' | 'indicadores'>('partos');
+  const [pestana, setPestana]         = useState<'servicios' | 'partos' | 'eventos' | 'indicadores'>('partos');
   const [tipoFiltro, setTipoFiltro]   = useState('');
   const [paginaActual, setPaginaActual] = useState(1);
   const [mostrarForm, setMostrarForm] = useState(false);
   const [anioIndicadores, setAnioIndicadores] = useState(new Date().getFullYear());
   const [fincaIndicadores, setFincaIndicadores] = useState('');
+  const [servicioAConfirmar, setServicioAConfirmar] = useState<ServicioAConfirmar | null>(null);
+  const [prenadaInicial, setPrenadaInicial] = useState(true);
+  const [gestacionACerrar, setGestacionACerrar] = useState<GestacionACerrar | null>(null);
 
   const { data: partosData, isLoading: cargandoPartos } = useQuery<PartoProximo[]>({
     queryKey: ['partos-proximos'],
     queryFn: () =>
-      clienteHttp.get('/reproduccion/partos-proximos', { params: { dias: 60, limite: 50 } })
+      clienteHttp.get('/reproduccion/partos-proximos', { params: { dias: 60, limite: 50, incluirVencidos: true } })
         .then((r) => r.data.datos ?? r.data),
     refetchInterval: 5 * 60_000,
+  });
+
+  const { data: servicios = [], isLoading: cargandoServicios } = useQuery<ServicioPorConfirmar[]>({
+    queryKey: ['servicios-por-confirmar'],
+    queryFn: () => clienteHttp.get('/reproduccion/servicios-por-confirmar').then((r) => r.data.datos ?? []),
+    refetchInterval: 5 * 60_000,
+  });
+
+  const { data: gestacionesActivas = [] } = useQuery<{ id: string }[]>({
+    queryKey: ['gestaciones-activas'],
+    queryFn: () => clienteHttp.get('/reproduccion/gestaciones').then((r) => r.data.datos ?? []),
   });
 
   const { data: eventosData, isLoading: cargandoEventos } = useQuery<RespuestaEventos>({
@@ -127,7 +169,20 @@ export default function PaginaReproduccion() {
   const partos   = partosData ?? [];
   const eventos  = eventosData?.datos ?? [];
   const meta     = eventosData?.meta;
-  const urgentes = partos.filter((p) => p.diasRestantes <= 7);
+  const vencidos = partos.filter((p) => p.diasRestantes < 0);
+  const urgentes = partos.filter((p) => p.diasRestantes >= 0 && p.diasRestantes <= 7);
+  const serviciosListos = servicios.filter((s) => s.listoParaRevisar);
+
+  const abrirConfirmacion = (s: ServicioPorConfirmar, prenada: boolean) => {
+    setPrenadaInicial(prenada);
+    setServicioAConfirmar({ id: s.id, descripcion: nombreAnimal(s.animal.numeroIdentificacion, s.animal.nombre), fecha: s.fecha });
+  };
+  const avisosPestana: Record<string, number> = {
+    servicios: serviciosListos.length,
+    partos: urgentes.length + vencidos.length,
+  };
+  const abrirCierre = (p: PartoProximo) =>
+    setGestacionACerrar({ id: p.id, descripcion: nombreAnimal(p.madreNumeroIdentificacion, p.madreNombre) });
   const proximos = partos.filter((p) => p.diasRestantes > 7 && p.diasRestantes <= 30);
   const futuros  = partos.filter((p) => p.diasRestantes > 30);
 
@@ -140,10 +195,10 @@ export default function PaginaReproduccion() {
         className="grid grid-cols-2 md:grid-cols-4 gap-4"
       >
         {[
-          { et: 'Gestaciones activas', val: partos.length,    ico: 'pregnant_woman', col: 'text-primary',   fondo: 'bg-primary/10' },
-          { et: 'Partos en 7 días',    val: urgentes.length,  ico: 'warning',        col: 'text-error',     fondo: 'bg-error-container', borde: !!urgentes.length },
-          { et: 'Partos en 30 días',   val: proximos.length,  ico: 'event_upcoming', col: 'text-secondary', fondo: 'bg-secondary/10' },
-          { et: 'Partos en 60 días',   val: futuros.length,   ico: 'calendar_month', col: 'text-tertiary',  fondo: 'bg-tertiary/10' },
+          { et: 'Gestaciones activas',     val: gestacionesActivas.length, ico: 'vaca_prenada', col: 'text-primary',   fondo: 'bg-primary/10' },
+          { et: 'Servicios por confirmar', val: servicios.length,          ico: 'science',        col: 'text-secondary', fondo: 'bg-secondary/10', borde: !!serviciosListos.length },
+          { et: 'Partos en 7 días',        val: urgentes.length,           ico: 'event_upcoming', col: 'text-tertiary',  fondo: 'bg-tertiary/10' },
+          { et: 'Partos sin registrar',    val: vencidos.length,           ico: 'warning',        col: 'text-error',     fondo: 'bg-error-container', borde: !!vencidos.length },
         ].map((kpi) => (
           <div key={kpi.et}
             className={`tarjeta-vidrio rounded-2xl p-4 ${kpi.borde ? 'border-l-4 border-l-error' : ''}`}
@@ -161,6 +216,7 @@ export default function PaginaReproduccion() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex gap-1 p-1 bg-surface-container rounded-xl overflow-x-auto max-w-full">
           {([
+            { clave: 'servicios',   et: 'Por confirmar',    ico: 'science' },
             { clave: 'partos',      et: 'Partos Próximos',  ico: 'child_care' },
             { clave: 'eventos',     et: 'Historial',         ico: 'history' },
             { clave: 'indicadores', et: 'Indicadores',       ico: 'bar_chart' },
@@ -176,9 +232,9 @@ export default function PaginaReproduccion() {
             >
               <Icono nombre={p.ico} clase="text-[16px]" />
               {p.et}
-              {p.clave === 'partos' && urgentes.length > 0 && (
+              {avisosPestana[p.clave] > 0 && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-error text-on-primary text-[9px] font-bold flex items-center justify-center">
-                  {urgentes.length}
+                  {avisosPestana[p.clave]}
                 </span>
               )}
             </button>
@@ -196,6 +252,85 @@ export default function PaginaReproduccion() {
 
       <AnimatePresence mode="wait">
 
+        {/* ── PESTAÑA: SERVICIOS POR CONFIRMAR ─────────────────────────────── */}
+        {pestana === 'servicios' && (
+          <motion.div key="servicios" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="space-y-3">
+            <div className="flex items-start gap-3 px-4 py-3 bg-surface-container rounded-2xl border border-outline-variant/20">
+              <Icono nombre="info" clase="text-[18px] text-primary flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-on-surface-variant leading-relaxed">
+                Inseminaciones y montas a las que falta registrar si la hembra quedó preñada. A los 21 días del servicio
+                llega una alerta para revisarla; al confirmar la preñez se abre la gestación con su fecha de parto estimada.
+              </p>
+            </div>
+            {cargandoServicios ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-2xl bg-surface-container animate-pulse" />
+                ))}
+              </div>
+            ) : !servicios.length ? (
+              <div className="tarjeta-vidrio rounded-2xl p-12 text-center">
+                <Icono nombre="task_alt" clase="text-[40px] text-outline mx-auto mb-3" />
+                <p className="font-medium text-on-surface-variant">Nada pendiente por confirmar</p>
+                <p className="text-sm text-outline mt-1">Las inseminaciones y montas nuevas aparecerán aquí</p>
+              </div>
+            ) : (
+              <div className="tarjeta-vidrio rounded-2xl overflow-hidden">
+                {servicios.map((s, idx) => (
+                  <div
+                    key={s.id}
+                    className={`flex flex-col sm:flex-row sm:items-center gap-3 px-4 py-3
+                               ${idx < servicios.length - 1 ? 'border-b border-outline-variant/20' : ''}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => navegar(`/animales/${s.animal.id}`)}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                    >
+                      <div className="p-2 bg-surface-container rounded-xl flex-shrink-0">
+                        <Icono nombre={TIPO_EVENTO[s.tipo]?.icono ?? 'science'} clase="text-[16px] text-on-surface-variant" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-on-surface truncate">
+                          {nombreAnimal(s.animal.numeroIdentificacion, s.animal.nombre)}
+                        </p>
+                        <p className="text-xs text-on-surface-variant">
+                          {TIPO_EVENTO[s.tipo]?.etiqueta} del{' '}
+                          {new Date(s.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                          {s.semental && ` · ${s.semental}`}
+                          {' · '}hace {s.diasTranscurridos} día(s)
+                        </p>
+                      </div>
+                    </button>
+                    <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                      {!s.listoParaRevisar && (
+                        <Badge variante="gris" tamano="xs">
+                          Revisar el {new Date(s.fechaRevision).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
+                        </Badge>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => abrirConfirmacion(s, true)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        Preñada
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => abrirConfirmacion(s, false)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-error-container text-on-error-container hover:opacity-80 transition-colors"
+                      >
+                        Vacía
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+        )}
+
         {/* ── PESTAÑA: PARTOS PRÓXIMOS ──────────────────────────────────────── */}
         {pestana === 'partos' && (
           <motion.div key="partos" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
@@ -209,21 +344,25 @@ export default function PaginaReproduccion() {
               <div className="tarjeta-vidrio rounded-2xl p-12 text-center">
                 <Icono nombre="event_available" clase="text-[40px] text-outline mx-auto mb-3" />
                 <p className="font-medium text-on-surface-variant">Sin partos programados</p>
-                <p className="text-sm text-outline mt-1">No hay gestaciones activas en los próximos 60 días</p>
+                <p className="text-sm text-outline mt-1">No hay gestaciones con parto en los próximos 60 días</p>
               </div>
             ) : (
               <div className="space-y-4">
+                {vencidos.length > 0 && (
+                  <GrupoPartos titulo="Fecha cumplida — registrar resultado" urgencia="alta" partos={vencidos}
+                    onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
+                )}
                 {urgentes.length > 0 && (
                   <GrupoPartos titulo="Urgentes (≤ 7 días)" urgencia="alta" partos={urgentes}
-                    onVerAnimal={(id) => navegar(`/animales/${id}`)} />
+                    onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
                 )}
                 {proximos.length > 0 && (
                   <GrupoPartos titulo="Próximos (8–30 días)" urgencia="media" partos={proximos}
-                    onVerAnimal={(id) => navegar(`/animales/${id}`)} />
+                    onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
                 )}
                 {futuros.length > 0 && (
                   <GrupoPartos titulo="Futuros (31–60 días)" urgencia="baja" partos={futuros}
-                    onVerAnimal={(id) => navegar(`/animales/${id}`)} />
+                    onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
                 )}
               </div>
             )}
@@ -293,6 +432,13 @@ export default function PaginaReproduccion() {
                               {new Date(ev.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}
                             </span>
                           </div>
+                          {ev.descripcion && ev.descripcion !== cfg.etiqueta && (
+                            <p className={`text-xs mt-1 font-medium ${
+                              esDescripcionDePerdida(ev.descripcion) ? 'text-error' : 'text-on-surface'
+                            }`}>
+                              {ev.descripcion}
+                            </p>
+                          )}
                           {ev.observaciones && (
                             <p className="text-xs text-on-surface-variant mt-1 line-clamp-1">{ev.observaciones}</p>
                           )}
@@ -379,7 +525,7 @@ export default function PaginaReproduccion() {
                         et: 'Tasa de Preñez',
                         val: `${indicadoresData.tasaPreniez}%`,
                         sub: `${indicadoresData.gestacionesEnCurso} de ${indicadoresData.totalHembras} hembras`,
-                        ico: 'pregnant_woman', col: 'text-primary', fondo: 'bg-primary/10',
+                        ico: 'vaca_prenada', col: 'text-primary', fondo: 'bg-primary/10',
                         bueno: indicadoresData.tasaPreniez >= 60,
                       },
                       {
@@ -442,7 +588,7 @@ export default function PaginaReproduccion() {
                       { et: 'Hembras activas',      val: indicadoresData.totalHembras,       ico: 'group',      col: 'text-on-surface' },
                       { et: 'Detecciones de celo',   val: indicadoresData.totalCelos,          ico: 'favorite',   col: 'text-tierra-700' },
                       { et: 'Inseminaciones / Montas', val: indicadoresData.totalInseminaciones, ico: 'science',   col: 'text-primary' },
-                      { et: 'Gestaciones en el año', val: indicadoresData.gestacionesAnio,     ico: 'pregnant_woman', col: 'text-secondary' },
+                      { et: 'Gestaciones en el año', val: indicadoresData.gestacionesAnio,     ico: 'vaca_prenada', col: 'text-secondary' },
                       { et: 'Partos registrados',    val: indicadoresData.gestacionesParto,    ico: 'child_care', col: 'text-tertiary' },
                       { et: 'Gestaciones en curso',  val: indicadoresData.gestacionesEnCurso,  ico: 'hourglass_top', col: 'text-primary' },
                       {
@@ -498,25 +644,31 @@ export default function PaginaReproduccion() {
           <FormularioEvento
             onCerrar={() => setMostrarForm(false)}
             onExito={() => {
-              queryClient.invalidateQueries({ queryKey: ['eventos-reproductivos'] });
-              queryClient.invalidateQueries({ queryKey: ['partos-proximos'] });
-              queryClient.invalidateQueries({ queryKey: ['indicadores-reproductivos'] });
+              invalidarSeguimientoReproductivo(queryClient);
               setMostrarForm(false);
             }}
           />
         )}
       </AnimatePresence>
+
+      <ModalConfirmarServicio
+        servicio={servicioAConfirmar}
+        prenadaInicial={prenadaInicial}
+        alCerrar={() => setServicioAConfirmar(null)}
+      />
+      <ModalResultadoParto gestacion={gestacionACerrar} alCerrar={() => setGestacionACerrar(null)} />
     </div>
   );
 }
 
 // ── Grupo de partos ───────────────────────────────────────────────────────────
 
-function GrupoPartos({ titulo, urgencia, partos, onVerAnimal }: {
+function GrupoPartos({ titulo, urgencia, partos, onVerAnimal, onRegistrar }: {
   titulo: string;
   urgencia: 'alta' | 'media' | 'baja';
   partos: PartoProximo[];
   onVerAnimal: (id: string) => void;
+  onRegistrar: (parto: PartoProximo) => void;
 }) {
   const cfg = {
     alta:  { dot: 'bg-error',     tit: 'text-error',     badge: 'rojo' as const,   card: 'border-error/20 bg-error-container/20' },
@@ -541,7 +693,7 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal }: {
           >
             <div className="flex items-center gap-3">
               <div className="p-2 bg-white/80 rounded-xl">
-                <Icono nombre="pregnant_woman" relleno clase="text-[16px] text-secondary" />
+                <Icono nombre="vaca_prenada" relleno clase="text-[16px] text-secondary" />
               </div>
               <div>
                 <span className="text-sm font-semibold text-on-surface">
@@ -551,13 +703,27 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal }: {
                 <p className="text-xs text-on-surface-variant">{p.finca}</p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-sm font-semibold text-on-surface">
-                {new Date(p.fechaPartoEsperado).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
-              </p>
-              <Badge variante={cfg.badge} tamano="xs">
-                {p.diasRestantes === 0 ? 'Hoy' : p.diasRestantes === 1 ? 'Mañana' : `${p.diasRestantes} días`}
-              </Badge>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-sm font-semibold text-on-surface">
+                  {new Date(p.fechaPartoEsperado).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
+                </p>
+                <Badge variante={cfg.badge} tamano="xs">
+                  {p.diasRestantes < 0 ? `Hace ${-p.diasRestantes} día(s)`
+                    : p.diasRestantes === 0 ? 'Hoy' : p.diasRestantes === 1 ? 'Mañana' : `${p.diasRestantes} días`}
+                </Badge>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRegistrar(p); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  p.diasRestantes <= 0
+                    ? 'bg-primary text-on-primary hover:opacity-90'
+                    : 'bg-white/80 text-on-surface-variant hover:text-primary'
+                }`}
+              >
+                Registrar parto
+              </button>
             </div>
           </div>
         ))}
@@ -599,7 +765,10 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
     observaciones: '',
     fechaInicio: hoy,
     fechaPartoEsperado: '',
-    crearGestacion: true,
+    // Por defecto un servicio queda "por confirmar" y la gestación se abre
+    // cuando se confirma la preñez; marcarlo solo si ya se sabe que preñó.
+    crearGestacion: false,
+    resultadoDiagnostico: '',
     // Campos IA
     clasificacionIA: '',
     tecnicaDeposicion: '',
@@ -650,8 +819,8 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
       if (datos.tipo === 'GESTACION') {
         return clienteHttp.post('/reproduccion/gestaciones', {
           madreId:            datos.animalId,
-          fechaInicio:        new Date(datos.fechaInicio).toISOString(),
-          fechaPartoEsperado: new Date(datos.fechaPartoEsperado).toISOString(),
+          fechaInicio:        isoMediodia(datos.fechaInicio),
+          fechaPartoEsperado: isoMediodia(datos.fechaPartoEsperado),
           observaciones:      datos.observaciones || undefined,
         });
       }
@@ -659,7 +828,7 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
       const payloadEvento: Record<string, any> = {
         animalId:      datos.animalId,
         tipo:          datos.tipo,
-        fecha:         new Date(datos.fecha).toISOString(),
+        fecha:         isoMediodia(datos.fecha),
         observaciones: datos.observaciones || undefined,
       };
       if (datos.tipo === 'INSEMINACION_ARTIFICIAL') {
@@ -671,13 +840,16 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
         if (datos.temperaturaUterina) payloadEvento.temperaturaUterina = parseFloat(datos.temperaturaUterina);
         if (datos.manejoHato)         payloadEvento.manejoHato         = datos.manejoHato;
       }
+      if (datos.tipo === 'DIAGNOSTICO_GESTACION' && datos.resultadoDiagnostico) {
+        payloadEvento.resultadoDiagnostico = datos.resultadoDiagnostico;
+      }
       await clienteHttp.post('/reproduccion', payloadEvento);
       // Si es IA o Monta y se optó por registrar gestación, crearla también
       if (TIPOS_INICIAN_GESTACION.has(datos.tipo) && datos.crearGestacion && datos.fechaPartoEsperado) {
         await clienteHttp.post('/reproduccion/gestaciones', {
           madreId:            datos.animalId,
-          fechaInicio:        new Date(datos.fecha).toISOString(),
-          fechaPartoEsperado: new Date(datos.fechaPartoEsperado).toISOString(),
+          fechaInicio:        isoMediodia(datos.fecha),
+          fechaPartoEsperado: isoMediodia(datos.fechaPartoEsperado),
           observaciones:      datos.observaciones || undefined,
         });
       }
@@ -799,24 +971,6 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                 animate={{ opacity: 1, height: 'auto' }}
                 className="overflow-hidden space-y-3"
               >
-                <div className="flex items-start gap-3 px-3.5 py-3 bg-primary/5 border border-primary/20 rounded-xl">
-                  <Icono nombre="pregnant_woman" relleno clase="text-[18px] text-primary flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-on-surface-variant leading-relaxed">
-                    La fecha de parto se estima a <strong className="text-on-surface">{DIAS_GESTACION_BOVINA} días</strong> de la fecha del evento.
-                    Puede ajustarla manualmente.
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    Parto Esperado <span className="text-error">*</span>
-                  </label>
-                  <CampoFecha
-                    value={form.fechaPartoEsperado}
-                    onChange={(valor) => setForm((f) => ({ ...f, fechaPartoEsperado: valor }))}
-                  />
-                </div>
-
                 <label className="flex items-center gap-2.5 cursor-pointer select-none">
                   <input
                     type="checkbox"
@@ -825,10 +979,49 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                     className="w-4 h-4 rounded accent-primary"
                   />
                   <span className="text-xs text-on-surface">
-                    Registrar gestación activa (aparecerá en Partos Próximos)
+                    La preñez ya está confirmada (registrar la gestación ahora)
                   </span>
                 </label>
+
+                {form.crearGestacion ? (
+                  <div>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                      Parto Esperado <span className="text-error">*</span>
+                    </label>
+                    <CampoFecha
+                      value={form.fechaPartoEsperado}
+                      onChange={(valor) => setForm((f) => ({ ...f, fechaPartoEsperado: valor }))}
+                    />
+                    <p className="text-[11px] text-on-surface-variant mt-1">
+                      Estimada a {DIAS_GESTACION_BOVINA} días de la fecha del evento; puede ajustarla.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-on-surface-variant px-3.5 py-2.5 bg-surface-container rounded-xl">
+                    Quedará en <strong className="text-on-surface">Por confirmar</strong>. A los 21 días llegará una alerta
+                    para registrar si quedó preñada.
+                  </p>
+                )}
               </motion.div>
+            )}
+
+            {form.tipo === 'DIAGNOSTICO_GESTACION' && (
+              <div>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Resultado</label>
+                <select
+                  value={form.resultadoDiagnostico}
+                  onChange={(e) => setForm((f) => ({ ...f, resultadoDiagnostico: e.target.value }))}
+                  className="campo-entrada"
+                >
+                  <option value="">Sin especificar</option>
+                  <option value="POSITIVO">Positivo (preñada)</option>
+                  <option value="NEGATIVO">Negativo (vacía)</option>
+                </select>
+                <p className="text-[11px] text-on-surface-variant mt-1">
+                  Si la hembra tiene una inseminación o monta por confirmar, este resultado la confirma
+                  (y abre la gestación si es positivo).
+                </p>
+              </div>
             )}
 
             {/* ── Campos específicos de IA ── */}

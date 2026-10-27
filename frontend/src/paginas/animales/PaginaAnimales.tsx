@@ -11,6 +11,7 @@ import Badge, { BadgeEstadoAnimal } from '../../componentes/ui/Badge';
 import useDebounce from '../../hooks/useDebounce';
 import Icono from '../../componentes/ui/Icono';
 import toast from 'react-hot-toast';
+import CriasPorRegistrar from './CriasPorRegistrar';
 
 // Listado principal de animales, con búsqueda (debounced), filtros y
 // paginación server-side.
@@ -281,6 +282,9 @@ export default function PaginaAnimales() {
           )}
         </div>
       </div>
+
+      {/* Crías nacidas en un parto que aún no están en el inventario */}
+      {puedeCrear && <CriasPorRegistrar />}
 
       {/* Filtros */}
       <div className="tarjeta-vidrio rounded-2xl p-4">

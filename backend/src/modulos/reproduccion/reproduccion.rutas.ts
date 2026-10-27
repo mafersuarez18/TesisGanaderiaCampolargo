@@ -14,6 +14,8 @@ import {
   controladorCerrarGestacion,
   controladorIndicadores,
   controladorEfectividadInseminacion,
+  controladorServiciosPorConfirmar,
+  controladorConfirmarServicio,
 } from './reproduccion.controlador';
 
 const enrutador = Router();
@@ -44,6 +46,18 @@ enrutador.patch(
   requerirPrivilegio('reproduccion.crear'),
   registrarAuditoria('Cerrar gestación', 'Gestacion'),
   controladorCerrarGestacion,
+);
+
+// GET /api/reproduccion/servicios-por-confirmar — inseminaciones y montas
+// a las que todavía no se les registró si la hembra quedó preñada
+enrutador.get('/servicios-por-confirmar', requerirPrivilegio('reproduccion.ver'), controladorServiciosPorConfirmar);
+
+// PATCH /api/reproduccion/servicios/:id/confirmar — preñada o vacía
+enrutador.patch(
+  '/servicios/:id/confirmar',
+  requerirPrivilegio('reproduccion.crear'),
+  registrarAuditoria('Confirmar resultado de servicio reproductivo', 'EventoReproductivo'),
+  controladorConfirmarServicio,
 );
 
 // GET /api/reproduccion/indicadores

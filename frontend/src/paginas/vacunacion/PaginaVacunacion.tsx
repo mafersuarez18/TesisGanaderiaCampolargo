@@ -8,6 +8,7 @@ import CampoFecha from '../../componentes/ui/CampoFecha';
 import Icono from '../../componentes/ui/Icono';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
+import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 
 // Calendarios de vacunación/desparasitación (qué se aplica y cada cuánto)
 // y el registro de cada aplicación concreta sobre un animal.
@@ -1104,7 +1105,7 @@ function FormularioRegistro({
       clienteHttp.post('/vacunacion', {
         calendarioVacunacionId: datos.calendarioVacunacionId,
         animalId: datos.animalId,
-        fechaAplicacion:   new Date(datos.fechaAplicacion).toISOString(),
+        fechaAplicacion:   isoMediodia(datos.fechaAplicacion),
         ...(datos.dosis             && { dosis: datos.dosis }),
         ...(datos.viaAdministracion && { viaAdministracion: datos.viaAdministracion }),
         ...(datos.lote              && { lote: datos.lote }),
@@ -1244,7 +1245,7 @@ function FormularioEditarRegistro({
   onExito: () => void;
 }) {
   const [form, setForm] = useState({
-    fechaAplicacion:  registro.fechaAplicacion.split('T')[0],
+    fechaAplicacion:  fechaLocalISO(new Date(registro.fechaAplicacion)),
     dosis:            registro.dosis            ?? '',
     viaAdministracion: registro.viaAdministracion ?? '',
     lote:             registro.lote             ?? '',
@@ -1255,7 +1256,7 @@ function FormularioEditarRegistro({
   const mutacion = useMutation({
     mutationFn: () =>
       clienteHttp.patch(`/vacunacion/${registro.id}`, {
-        fechaAplicacion:   new Date(form.fechaAplicacion).toISOString(),
+        fechaAplicacion:   isoMediodia(form.fechaAplicacion),
         dosis:             form.dosis             || undefined,
         viaAdministracion: form.viaAdministracion || undefined,
         lote:              form.lote              || undefined,

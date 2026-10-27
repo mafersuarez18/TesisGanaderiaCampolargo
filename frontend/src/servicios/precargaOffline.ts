@@ -74,6 +74,7 @@ function consultasDePantallas(): Consulta[] {
     { url: '/fincas', params: { porPagina: 100 } },
     { url: '/lotes' },
     { url: '/animales/razas' },
+    { url: '/animales/crias-por-registrar' },
     { url: '/vacunacion/medicamentos' },
     // Animales (listado por defecto y selectores de padre/madre)
     { url: '/animales', params: { pagina: 1, porPagina: 25, estado: 'ACTIVO' } },
@@ -88,7 +89,9 @@ function consultasDePantallas(): Consulta[] {
     { url: '/vacunacion', params: { porPagina: 50 } },
     { url: '/vacunacion/cumplimiento-por-lote' },
     // Reproducción
-    { url: '/reproduccion/partos-proximos', params: { dias: 60, limite: 50 } },
+    { url: '/reproduccion/partos-proximos', params: { dias: 60, limite: 50, incluirVencidos: true } },
+    { url: '/reproduccion/servicios-por-confirmar' },
+    { url: '/reproduccion/gestaciones' },
     { url: '/reproduccion', params: { pagina: 1, porPagina: 25 } },
     { url: '/reproduccion/indicadores', params: { anio } },
     // Inseminación

@@ -36,6 +36,7 @@ const seleccionListado = {
 
 const seleccionDetalle = {
   ...seleccionListado,
+  pesoNacimiento: true,
   marcas: true,
   observaciones: true,
   fechaEgreso: true,
@@ -151,4 +152,62 @@ export async function existeRazaRegistrada(nombre: string): Promise<boolean> {
 
 export async function crearRaza(datos: Prisma.RazaCreateInput) {
   return prisma.raza.create({ data: datos });
+}
+
+// ── Crías por registrar ──────────────────────────────────────────────────────
+// Nacimientos de crías vivas que todavía no tienen un Animal asociado (el
+// parto se registra en Reproducción y la cría se da de alta después, cuando
+// ya tiene su identificación).
+
+const dondeCriaPendiente: Prisma.NacimientoWhereInput = {
+  estadoCria: 'VIVO',
+  criaId: null,
+  animalOrigen: { is: null },
+};
+
+const seleccionCriaPendiente = {
+  id: true,
+  fechaNacimiento: true,
+  sexoCria: true,
+  pesoAlNacer: true,
+  tipoParto: true,
+  observaciones: true,
+  gestacion: {
+    select: {
+      madre: {
+        select: {
+          id: true,
+          numeroIdentificacion: true,
+          nombre: true,
+          proposito: true,
+          raza: { select: { id: true, nombre: true } },
+          lote: { select: { id: true, nombre: true, finca: { select: { id: true, nombre: true } } } },
+        },
+      },
+      eventoReproductivo: {
+        select: {
+          tipo: true,
+          inseminacion: { select: { inventarioSemen: { select: { semental: { select: { nombre: true } } } } } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.NacimientoSelect;
+
+export async function listarCriasPorRegistrar(fincaId?: string) {
+  return prisma.nacimiento.findMany({
+    where: {
+      ...dondeCriaPendiente,
+      ...(fincaId && { gestacion: { madre: { lote: { fincaId } } } }),
+    },
+    select: seleccionCriaPendiente,
+    orderBy: { fechaNacimiento: 'desc' },
+  });
+}
+
+export async function obtenerCriaPorRegistrar(nacimientoId: string) {
+  return prisma.nacimiento.findFirst({
+    where: { id: nacimientoId, ...dondeCriaPendiente },
+    select: seleccionCriaPendiente,
+  });
 }

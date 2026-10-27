@@ -11,6 +11,8 @@ import {
   cerrarGestacion,
   obtenerIndicadoresReproductivos,
   obtenerEfectividadInseminacion,
+  listarServiciosPorConfirmar,
+  confirmarServicio,
 } from './reproduccion.servicio';
 import {
   respuestaExito,
@@ -47,6 +49,8 @@ const esquemaEvento = z.object({
   balanceEnergetico:   z.string().max(200).optional(),
   temperaturaUterina:  z.number().optional(),
   manejoHato:          z.nativeEnum(NivelEstres).optional(),
+  // Solo para DIAGNOSTICO_GESTACION
+  resultadoDiagnostico: z.enum(['POSITIVO', 'NEGATIVO']).optional(),
 });
 
 const esquemaGestacion = z.object({
@@ -61,11 +65,12 @@ export async function controladorPartosProximos(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const { dias, limite } = z.object({
+    const { dias, limite, incluirVencidos } = z.object({
       dias:   z.coerce.number().int().positive().max(180).default(30),
       limite: z.coerce.number().int().positive().max(50).default(20),
+      incluirVencidos: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
     }).parse(req.query);
-    const partos = await listarPartosProximos(dias, limite);
+    const partos = await listarPartosProximos(dias, limite, incluirVencidos);
     return respuestaExito(res, partos);
   } catch (error) { return next(error); }
 }
@@ -163,7 +168,35 @@ export async function controladorCerrarGestacion(
         complicaciones: z.string().max(500).optional(),
       }).optional(),
     }).parse(req.body);
-    const gestacion = await cerrarGestacion(req.params['id'] as string, resultado, fechaPartoReal, nacimiento);
+    const { gestacion } = await cerrarGestacion(
+      req.params['id'] as string, resultado, fechaPartoReal, nacimiento, req.usuarioActual!.id,
+    );
     return respuestaExito(res, gestacion);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorServiciosPorConfirmar(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const { fincaId } = z.object({ fincaId: z.string().min(1).optional() }).parse(req.query);
+    const servicios = await listarServiciosPorConfirmar(fincaId);
+    return respuestaExito(res, servicios);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorConfirmarServicio(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = z.object({
+      prenada:            z.boolean(),
+      fechaDiagnostico:   z.coerce.date().optional(),
+      metodoDiagnostico:  z.string().max(100).optional(),
+      fechaPartoEsperado: z.coerce.date().optional(),
+      observaciones:      z.string().max(500).optional(),
+    }).parse(req.body);
+    const resultado = await confirmarServicio(req.params['id'] as string, datos, req.usuarioActual!.id);
+    return respuestaExito(res, resultado);
   } catch (error) { return next(error); }
 }

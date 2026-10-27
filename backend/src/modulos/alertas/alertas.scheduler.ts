@@ -3,6 +3,7 @@ import prisma from '../../compartido/prisma/clientePrisma';
 import { logger } from '../../config/logger';
 import { TipoAlertaRegla, EstadoNotificacion, PrioridadAlerta } from '@prisma/client';
 import { enviarCorreoAlerta } from '../notificaciones/correo.servicio';
+import { listarServiciosPorConfirmar, DIAS_REVISION_SERVICIO } from '../reproduccion/reproduccion.servicio';
 
 // ── Motor de alertas ────────────────────────────────────────────────────────
 // Evalúa periódicamente las ReglaAlerta activas (vacunas por vencer, partos
@@ -46,6 +47,22 @@ export async function evaluarTodasLasReglas(
     const msg = `Error evaluando tratamientos finalizados: ${String(error)}`;
     logger.error(msg);
     errores.push(msg);
+  }
+
+  // Seguimiento del ciclo reproductivo, también siempre activo: confirmar si
+  // una inseminación o monta funcionó, y registrar cómo salió un parto cuya
+  // fecha esperada ya se cumplió.
+  for (const [nombre, evaluar] of [
+    ['servicios por confirmar', evaluarServiciosPorConfirmar],
+    ['partos con fecha cumplida', evaluarPartosVencidos],
+  ] as const) {
+    try {
+      await evaluar();
+    } catch (error) {
+      const msg = `Error evaluando ${nombre}: ${String(error)}`;
+      logger.error(msg);
+      errores.push(msg);
+    }
   }
 
   for (const regla of reglas) {
@@ -386,6 +403,69 @@ async function evaluarTratamientosFinalizados(): Promise<void> {
   }
 }
 
+/**
+ * Inseminaciones y montas con DIAS_REVISION_SERVICIO días o más sin que se
+ * haya registrado si la hembra quedó preñada. Se responde desde la alerta o
+ * desde Reproducción → Por confirmar (PATCH /reproduccion/servicios/:id/confirmar),
+ * lo que crea la gestación si fue positivo.
+ */
+async function evaluarServiciosPorConfirmar(): Promise<void> {
+  const servicios = await listarServiciosPorConfirmar();
+
+  for (const servicio of servicios) {
+    if (!servicio.listoParaRevisar) continue;
+    const animal = servicio.animal;
+    const tipo = servicio.tipo === 'INSEMINACION_ARTIFICIAL' ? 'inseminación' : 'monta natural';
+
+    await crearNotificacionSiNoExiste(
+      interpolar('Revisar {tipo} — {animal}', {
+        tipo: servicio.tipo === 'INSEMINACION_ARTIFICIAL' ? 'inseminación' : 'monta',
+        animal: animal.nombre ?? animal.numeroIdentificacion,
+      }),
+      `Han pasado ${servicio.diasTranscurridos} días desde la ${tipo} del ${servicio.fecha.toLocaleDateString('es-VE')} `
+        + `(revisión a los ${DIAS_REVISION_SERVICIO} días). ¿Quedó preñada?`,
+      PrioridadAlerta.MEDIA,
+      'EventoReproductivo',
+      servicio.id,
+      animal.lote.fincaId,
+    );
+  }
+}
+
+/**
+ * Gestaciones en curso cuya fecha de parto esperada ya llegó sin que se
+ * registrara el resultado. Se responde desde la alerta o desde
+ * Reproducción → Partos (PATCH /reproduccion/gestaciones/:id/cerrar).
+ */
+async function evaluarPartosVencidos(): Promise<void> {
+  const finHoy = new Date();
+  finHoy.setHours(23, 59, 59, 999);
+
+  const gestaciones = await prisma.gestacion.findMany({
+    where: {
+      estadoGestacion: 'EN_CURSO',
+      fechaPartoEsperado: { lte: finHoy },
+      madre: { estado: 'ACTIVO' },
+    },
+    include: {
+      madre: { select: { numeroIdentificacion: true, nombre: true, lote: { select: { fincaId: true } } } },
+    },
+  });
+
+  for (const gestacion of gestaciones) {
+    const madre = gestacion.madre;
+    const fecha = gestacion.fechaPartoEsperado.toLocaleDateString('es-VE');
+    await crearNotificacionSiNoExiste(
+      interpolar('Fecha de parto cumplida — {animal}', { animal: madre.nombre ?? madre.numeroIdentificacion }),
+      `El parto se esperaba el ${fecha}. ¿Cómo salió? Registra el resultado para cerrar la gestación.`,
+      PrioridadAlerta.ALTA,
+      'Gestacion',
+      gestacion.id,
+      madre.lote.fincaId,
+    );
+  }
+}
+
 /** Animales activos sin consulta veterinaria en más de N días */
 async function evaluarAusenciaControlVeterinario(
   umbralDias: number,
@@ -646,4 +726,6 @@ export {
   evaluarIntervaloParto,
   evaluarInventarioSemen,
   evaluarTratamientosFinalizados,
+  evaluarServiciosPorConfirmar,
+  evaluarPartosVencidos,
 };

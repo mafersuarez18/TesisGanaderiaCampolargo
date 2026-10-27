@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,11 +10,14 @@ import SelectorRaza from '../../componentes/ui/SelectorRaza';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import { clienteHttp, ID_TOAST_CONEXION } from '../../servicios/clienteAxios';
 import toast from 'react-hot-toast';
+import { useCriasPorRegistrar, nombreMadre, CLAVE_CRIAS_POR_REGISTRAR } from './CriasPorRegistrar';
+import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 
 // Formulario de alta/edición de animal. La raza usa el patrón "buscar o
 // crear": si el veterinario escribe un nombre que no está en el catálogo,
 // el formulario despliega los campos para darla de alta ahí mismo antes de
-// enviar el animal.
+// enviar el animal. Con ?nacimiento=<id> registra una cría de "Crías por
+// registrar": se rellena con los datos del parto y queda enlazada a él.
 const esquemaAnimal = z.object({
   numeroIdentificacion:      z.string().min(1, 'La identificación es requerida').max(50),
   tipoIdentificacion: z.enum(['ARETE', 'HIERRO_NUMERO', 'MICROCHIP', 'OTRO']).default('ARETE'),
@@ -76,6 +79,10 @@ export default function PaginaFormAnimal() {
   const navegar = useNavigate();
   const cliente = useQueryClient();
   const esEdicion = !!id;
+  const [parametrosUrl] = useSearchParams();
+  const nacimientoId = esEdicion ? null : parametrosUrl.get('nacimiento');
+  const { data: crias = [], isLoading: cargandoCrias } = useCriasPorRegistrar();
+  const cria = nacimientoId ? crias.find((c) => c.id === nacimientoId) : undefined;
 
   const { data: animalExistente, isLoading: cargandoAnimal } = useQuery({
     queryKey: ['animal', id],
@@ -125,7 +132,7 @@ export default function PaginaFormAnimal() {
         estado:          animalExistente.estado,
         estadoSanitario: animalExistente.estadoSanitario,
         proposito:       animalExistente.proposito ?? '',
-        fechaNacimiento: animalExistente.fechaNacimiento?.split('T')[0] ?? '',
+        fechaNacimiento: animalExistente.fechaNacimiento ? fechaLocalISO(new Date(animalExistente.fechaNacimiento)) : '',
         pesoActual:      animalExistente.pesoActual ?? '',
         color:           animalExistente.color ?? '',
         observaciones:   animalExistente.observaciones ?? '',
@@ -139,6 +146,37 @@ export default function PaginaFormAnimal() {
       });
     }
   }, [animalExistente, reset]);
+
+  // Pre-rellenar con los datos del nacimiento al registrar una cría
+  useEffect(() => {
+    if (!cria) return;
+    const madre = cria.gestacion.madre;
+    reset({
+      estado:          'ACTIVO',
+      estadoSanitario: 'SANO',
+      tipoIdentificacion: 'ARETE',
+      numeroIdentificacion: '',
+      ...(cria.sexoCria && { sexo: cria.sexoCria }),
+      proposito:       madre.proposito as FormularioAnimal['proposito'],
+      fechaNacimiento: fechaLocalISO(new Date(cria.fechaNacimiento)),
+      pesoActual:      cria.pesoAlNacer ?? '',
+      fincaId:         madre.lote.finca.id,
+      loteId:          madre.lote.id,
+      razaId:          madre.raza.id,
+      madreId:         madre.id,
+      procedencia:     'Nacida en la finca',
+      observaciones:   cria.semental ? `Hija/o del semental ${cria.semental} (inseminación artificial).` : '',
+    });
+  }, [cria, reset]);
+
+  // Los <select> de lote y madre solo muestran el valor una vez cargadas sus
+  // opciones: se vuelve a fijar cuando llegan, para que no aparezcan vacíos.
+  useEffect(() => {
+    if (cria && lotes.length) setValue('loteId', cria.gestacion.madre.lote.id);
+  }, [cria, lotes, setValue]);
+  useEffect(() => {
+    if (cria && hembras.length) setValue('madreId', cria.gestacion.madre.id);
+  }, [cria, hembras, setValue]);
 
   const mutacion = useMutation({
     mutationFn: async (datos: FormularioAnimal) => {
@@ -163,18 +201,27 @@ export default function PaginaFormAnimal() {
 
       // Limpiar campos vacíos
       const payload = Object.fromEntries(
-        Object.entries({ ...resto, razaId }).filter(([, v]) => v !== '' && v !== undefined && v !== null)
+        Object.entries({
+          ...resto,
+          razaId,
+          ...(resto.fechaNacimiento && { fechaNacimiento: isoMediodia(resto.fechaNacimiento) }),
+        }).filter(([, v]) => v !== '' && v !== undefined && v !== null)
       );
       if (esEdicion) {
         const { data } = await clienteHttp.patch(`/animales/${id}`, payload, { descripcionOffline: 'Edición de animal' });
         return data.datos;
       }
-      const { data } = await clienteHttp.post('/animales', payload, { descripcionOffline: 'Nuevo animal' });
+      const { data } = await clienteHttp.post(
+        '/animales',
+        { ...payload, ...(cria && { nacimientoId: cria.id }) },
+        { descripcionOffline: cria ? 'Registro de cría' : 'Nuevo animal' },
+      );
       return data.datos;
     },
     onSuccess: (animal) => {
       cliente.invalidateQueries({ queryKey: ['animales'] });
       cliente.invalidateQueries({ queryKey: ['animal', id] });
+      cliente.invalidateQueries({ queryKey: CLAVE_CRIAS_POR_REGISTRAR });
       // Sin conexión el registro quedó en la cola offline y todavía no hay
       // animal creado al cual navegar: se vuelve al listado (o a la ficha, si
       // era una edición) y se reemplaza el aviso genérico del interceptor
@@ -197,7 +244,7 @@ export default function PaginaFormAnimal() {
     },
   });
 
-  if (esEdicion && cargandoAnimal) {
+  if ((esEdicion && cargandoAnimal) || (nacimientoId && cargandoCrias)) {
     return (
       <div className="flex items-center justify-center py-20">
         <Icono nombre="progress_activity" clase="text-[24px] animate-spin text-primary" />
@@ -218,13 +265,30 @@ export default function PaginaFormAnimal() {
         </button>
         <div>
           <h1 className="text-xl font-bold text-[var(--color-piedra-900)]">
-            {esEdicion ? 'Editar animal' : 'Registrar nuevo animal'}
+            {esEdicion ? 'Editar animal' : cria ? 'Registrar cría' : 'Registrar nuevo animal'}
           </h1>
           <p className="text-xs text-[var(--color-piedra-500)]">
             {esEdicion ? `Editando: ${animalExistente?.nombre ?? `#${animalExistente?.numeroIdentificacion}`}` : 'Complete los datos del animal'}
           </p>
         </div>
       </div>
+
+      {cria && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-2xl bg-secondary/10 border border-secondary/25">
+          <Icono nombre="child_care" clase="text-[20px] text-secondary flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-on-surface-variant">
+            Cría de <strong className="text-on-surface">{nombreMadre(cria)}</strong>, nacida el{' '}
+            {new Date(cria.fechaNacimiento).toLocaleDateString('es-VE', { day: '2-digit', month: 'long', year: 'numeric' })}.
+            Los datos del parto ya están cargados; solo falta su identificación. Al guardar quedará enlazada a ese nacimiento.
+          </p>
+        </div>
+      )}
+      {nacimientoId && !cria && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+          <Icono nombre="warning" clase="text-[20px] flex-shrink-0" />
+          Esa cría ya fue registrada o el nacimiento no existe. Puede registrar el animal igualmente, sin enlace al parto.
+        </div>
+      )}
 
       <form onSubmit={handleSubmit((datos) => mutacion.mutate(datos))} className="space-y-5">
 
@@ -349,7 +413,7 @@ export default function PaginaFormAnimal() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <CampoForm etiqueta="Fecha de nacimiento">
               <Controller name="fechaNacimiento" control={control} render={({ field }) => (
-                <CampoFecha value={field.value ?? ''} onChange={field.onChange} />
+                <CampoFecha value={field.value ?? ''} onChange={field.onChange} disabled={!!cria} />
               )} />
             </CampoForm>
             <CampoForm etiqueta="Peso (kg)">
@@ -402,7 +466,7 @@ export default function PaginaFormAnimal() {
               </select>
             </CampoForm>
             <CampoForm etiqueta="Madre (hembra)" error={errors.madreId?.message}>
-              <select {...register('madreId')} className="campo-entrada">
+              <select {...register('madreId')} className="campo-entrada" disabled={!!cria}>
                 <option value="">Sin madre registrada</option>
                 {(hembras as any[])
                   .filter((h: any) => h.id !== id)

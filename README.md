@@ -238,6 +238,7 @@ Subdivisión de cada finca en agrupaciones de animales (potreros de manejo):
 - Ficha detallada de cada animal: datos básicos, genealogía, peso, estado sanitario
 - Identificación generalizada: arete, hierro/número, microchip u otro, con número único
 - Selector de raza con patrón "buscar o crear": si la raza no existe en el catálogo, se registra ahí mismo desde el formulario
+- **Crías por registrar**: las crías vivas de un parto registrado en Reproducción aparecen arriba del listado hasta darlas de alta; "Registrar" abre el formulario ya rellenado (madre, fecha y peso al nacer, sexo, lote, raza y propósito de la madre) y el animal queda enlazado a su nacimiento
 - Exportación del inventario a Excel
 - Registro sin conexión: el animal queda en el dispositivo y el listado muestra un aviso con los animales pendientes de subir
 
@@ -263,8 +264,14 @@ Subdivisión de cada finca en agrupaciones de animales (potreros de manejo):
 ### 7. Reproducción
 
 - Eventos reproductivos: detección de celo, monta natural, inseminación artificial, diagnóstico de gestación, parto, aborto
-- Seguimiento de gestaciones activas, con cierre por parto, aborto o pérdida
-- Partos próximos clasificados por urgencia (urgente / próximo / futuro) según los días restantes
+- **Seguimiento del ciclo completo**:
+  1. Una inseminación (desde Inseminación o Reproducción) o una monta queda en la pestaña **Por confirmar**
+  2. A los **21 días** llega una alerta "¿Quedó preñada?"; al responder *Sí* se abre la gestación con el parto estimado a 283 días, y al responder *No* la hembra queda libre para otro servicio
+  3. Al cumplirse la fecha de parto llega una alerta "¿Cómo salió el parto?" para registrar parto (con los datos de la cría), aborto o pérdida, lo que cierra la gestación y deja el evento en el historial. Si la cría nació viva, queda en Animales → **Crías por registrar** hasta que se le asigne su identificación
+  4. Las mismas respuestas se pueden dar desde Reproducción; un diagnóstico de gestación con resultado o un parto/aborto registrados con "Nuevo evento" también actualizan el seguimiento
+- Partos próximos clasificados por urgencia (urgente / próximo / futuro); los que ya pasaron su fecha sin registrar aparecen arriba como "Fecha cumplida"
+- El historial muestra el resultado de cada parto o pérdida (p. ej. "Parto — cría hembra, muerta al nacer, parto distócico, 28 kg" o "Pérdida de la gestación"), resaltando en rojo las pérdidas
+- La mortalidad de crías (dashboard e indicadores) cuenta tanto los animales que murieron como las crías que nacieron muertas o murieron en sus primeras 24 h según el registro del parto
 - Indicadores: tasa de preñez, natalidad, aborto, mortalidad de crías, repetición de celo, intervalo entre partos y efectividad de inseminación artificial por semental
 
 ### 8. Inseminación
@@ -291,6 +298,7 @@ Rastreo GPS de animales, listo para operar con collares satelitales reales (p. e
 - Tipos de alerta: vacuna vencida/próxima, parto próximo, días abiertos excedidos, enfermedad activa sin resolución, intervalo reproductivo prolongado, ausencia de control veterinario, control de peso pendiente, inventario de semen bajo, además de reglas personalizadas
 - Evaluación periódica automática (`node-cron`) y evaluación manual bajo demanda
 - Al vencer la duración de un tratamiento, pregunta si el animal mejoró y cierra el tratamiento con la respuesta
+- A los 21 días de una inseminación o monta pregunta si la hembra quedó preñada, y al cumplirse la fecha de parto pregunta cómo salió; ambas se responden desde la misma alerta
 - Cada regla puede notificar a usuarios específicos o, por defecto, a administradores y veterinarios
 
 ### 11. Reportes
@@ -595,6 +603,7 @@ La API está disponible en `http://localhost:3001/api`.
 | GET | `/animales` | Listar animales (paginado, con filtros) |
 | GET | `/animales/:id` | Detalle de un animal |
 | GET | `/animales/razas` | Catálogo de razas |
+| GET | `/animales/crias-por-registrar` | Crías vivas de partos registrados que aún no son animales (`POST /animales` con `nacimientoId` las enlaza) |
 | GET | `/historial-medico` | Listar consultas veterinarias |
 | POST | `/historial-medico` | Registrar consulta (con enfermedades, tratamientos, desparasitaciones, vitaminas y pruebas complementarias) |
 | GET | `/historial-medico/prefill?animalId=` | Pre-cargar última desparasitación y enfermedades activas |
@@ -606,7 +615,9 @@ La API está disponible en `http://localhost:3001/api`.
 | GET | `/vacunacion` | Listar registros de vacunación |
 | PATCH / DELETE | `/vacunacion/:id` | Editar / eliminar un registro de vacunación |
 | GET | `/vacunacion/cumplimiento-por-lote` | Cumplimiento del calendario por lote |
-| GET | `/reproduccion/partos-proximos` | Gestaciones con parto próximo |
+| GET | `/reproduccion/partos-proximos` | Gestaciones con parto próximo (`incluirVencidos=true` añade las de fecha cumplida) |
+| GET | `/reproduccion/servicios-por-confirmar` | Inseminaciones y montas pendientes de confirmar preñez |
+| PATCH | `/reproduccion/servicios/:id/confirmar` | Registrar si la hembra quedó preñada (abre la gestación si es positivo) |
 | GET | `/reproduccion/gestaciones` | Gestaciones activas |
 | PATCH | `/reproduccion/gestaciones/:id/cerrar` | Cerrar una gestación (parto/aborto/pérdida) |
 | GET | `/reproduccion/indicadores` | Indicadores reproductivos del período |

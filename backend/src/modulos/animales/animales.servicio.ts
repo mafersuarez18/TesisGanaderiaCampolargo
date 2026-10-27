@@ -11,6 +11,8 @@ import {
   existeRazaRegistrada,
   crearRaza,
   contarVacunacionesPorAnimal,
+  listarCriasPorRegistrar,
+  obtenerCriaPorRegistrar,
   FiltrosAnimal,
 } from './animales.repositorio';
 import {
@@ -61,11 +63,35 @@ export interface DatosCrearAnimal {
   razaId:         string;
   padreId?:       string;
   madreId?:       string;
+  // Nacimiento (registrado al cerrar un parto) del que proviene la cría.
+  nacimientoId?:  string;
+}
+
+export async function servicioListarCriasPorRegistrar(fincaId?: string) {
+  const crias = await listarCriasPorRegistrar(fincaId);
+  const hoy = Date.now();
+  return crias.map((c) => ({
+    ...c,
+    diasDeNacida: Math.max(0, Math.floor((hoy - c.fechaNacimiento.getTime()) / 86_400_000)),
+    semental: c.gestacion.eventoReproductivo?.inseminacion?.inventarioSemen?.semental.nombre ?? null,
+  }));
 }
 
 export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
   if (await existeAreteRegistrado(datos.numeroIdentificacion)) {
     throw new ErrorConflicto(`Ya existe un animal registrado con esa identificación: '${datos.numeroIdentificacion}'`);
+  }
+
+  // Al registrar una cría desde "Crías por registrar", se enlaza con su
+  // nacimiento y se toman de él la madre, la fecha y el peso al nacer.
+  let nacimiento: Awaited<ReturnType<typeof obtenerCriaPorRegistrar>> = null;
+  if (datos.nacimientoId) {
+    nacimiento = await obtenerCriaPorRegistrar(datos.nacimientoId);
+    if (!nacimiento) {
+      throw new ErrorConflicto('Ese nacimiento no existe o su cría ya fue registrada');
+    }
+    datos.madreId = nacimiento.gestacion.madre.id;
+    datos.fechaNacimiento = nacimiento.fechaNacimiento;
   }
 
   if (datos.padreId) {
@@ -80,7 +106,7 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
     if (madre.sexo !== 'HEMBRA') throw new ErrorValidacionDatos('La madre debe ser de sexo HEMBRA');
   }
 
-  const { loteId, razaId, padreId, madreId, ...resto } = datos;
+  const { loteId, razaId, padreId, madreId, nacimientoId: _nacimientoId, ...resto } = datos;
 
   return crearAnimal({
     ...resto,
@@ -88,6 +114,13 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
     raza:  { connect: { id: razaId } },
     ...(padreId && { padre: { connect: { id: padreId } } }),
     ...(madreId && { madre: { connect: { id: madreId } } }),
+    ...(nacimiento && {
+      pesoNacimiento: nacimiento.pesoAlNacer ?? undefined,
+      // Las dos direcciones del enlace nacimiento ↔ cría (Nacimiento.criaId
+      // y Animal.nacimientoId) quedan apuntando una a la otra.
+      nacimientosComoCria: { connect: { id: nacimiento.id } },
+      nacimientoOrigen:    { connect: { id: nacimiento.id } },
+    }),
   });
 }
 

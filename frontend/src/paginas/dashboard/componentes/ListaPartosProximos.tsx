@@ -54,7 +54,7 @@ export default function ListaPartosProximos() {
     return (
       <div className="py-8 text-center">
         <div className="w-10 h-10 bg-secondary/10 rounded-full flex items-center justify-center mx-auto mb-2">
-          <Icono nombre="pregnant_woman" clase="text-[18px] text-secondary" />
+          <Icono nombre="vaca_prenada" clase="text-[18px] text-secondary" />
         </div>
         <p className="text-sm text-on-surface-variant">Sin partos en los próximos 30 días</p>
       </div>
@@ -69,7 +69,7 @@ export default function ListaPartosProximos() {
           className="flex items-center gap-3 p-2 rounded-xl hover:bg-surface-container-low transition-colors cursor-pointer"
         >
           <div className="bg-secondary/10 p-2 rounded-xl flex-shrink-0">
-            <Icono nombre="pregnant_woman" relleno clase="text-[14px] text-secondary" />
+            <Icono nombre="vaca_prenada" relleno clase="text-[14px] text-secondary" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-on-surface truncate">

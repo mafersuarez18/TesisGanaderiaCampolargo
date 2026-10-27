@@ -94,7 +94,7 @@ export default function PaginaReportes() {
       id:          'reproductivo',
       titulo:      'Indicadores Reproductivos',
       descripcion: 'Tasa de preñez, natalidad, mortalidad de crías, días abiertos y eficiencia reproductiva anual.',
-      icono:       'pregnant_woman',
+      icono:       'vaca_prenada',
       colorIcono:  'text-tertiary',
       fondoIcono:  'bg-tertiary/10',
       endpoint:    '/reportes/reproductivo',

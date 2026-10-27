@@ -12,7 +12,9 @@ import Icono from '../../componentes/ui/Icono';
 import Paginacion from '../../componentes/ui/Paginacion';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
 import CampoFecha from '../../componentes/ui/CampoFecha';
+import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
 import toast from 'react-hot-toast';
+import { isoMediodia } from '../../servicios/fechas';
 
 // Laboratorio de inseminación artificial: catálogo de sementales,
 // inventario de dosis de semen y el registro de cada inseminación
@@ -140,7 +142,7 @@ export default function PaginaInseminacion() {
       const payload: Record<string, any> = {
         receptoraId:       datos.receptoraId,
         inventarioSemenId: datos.inventarioSemenId,
-        fecha:             datos.fecha,
+        fecha:             isoMediodia(datos.fecha),
         numeroIntento:     datos.numeroIntento,
       };
       if (datos.observaciones)       payload.observaciones       = datos.observaciones;
@@ -153,10 +155,14 @@ export default function PaginaInseminacion() {
       if (datos.manejoHato)          payload.manejoHato          = datos.manejoHato;
       return clienteHttp.post('/inseminacion', payload, { descripcionOffline: 'Inseminación artificial' });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inseminaciones'] });
+    onSuccess: (r) => {
+      // La inseminación también es un evento reproductivo: queda en
+      // Reproducción → Por confirmar hasta que se registre si preñó.
+      invalidarSeguimientoReproductivo(qc);
       qc.invalidateQueries({ queryKey: ['inv-semen'] });
-      toast.success('Inseminación registrada correctamente');
+      if (!r.data?.offline) {
+        toast.success('Inseminación registrada. Quedó en Reproducción → Por confirmar; en 21 días llegará la alerta para revisarla.', { duration: 6000 });
+      }
       setModalIns(false);
     },
     onError: (e: any) => toast.error(e?.response?.data?.mensaje ?? 'Error al registrar'),
@@ -841,8 +847,8 @@ function ModalLoteSemen({
         ...(form.volumen         && { volumen:         Number(form.volumen) }),
         ...(form.coloracion      && { coloracion:      form.coloracion }),
         ...(form.temperatura     && { temperatura:     Number(form.temperatura) }),
-        ...(form.fechaColeccion  && { fechaColeccion:  new Date(form.fechaColeccion).toISOString() }),
-        ...(form.fechaVencimiento && { fechaVencimiento: new Date(form.fechaVencimiento).toISOString() }),
+        ...(form.fechaColeccion  && { fechaColeccion:  isoMediodia(form.fechaColeccion) }),
+        ...(form.fechaVencimiento && { fechaVencimiento: isoMediodia(form.fechaVencimiento) }),
         ...(form.observaciones   && { observaciones:   form.observaciones }),
       }),
     onSuccess: () => { toast.success('Lote registrado correctamente'); onExito(); },
