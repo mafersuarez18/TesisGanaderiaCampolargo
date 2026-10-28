@@ -30,7 +30,6 @@ import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/p
 const esquemaCalendarioBase = z.object({
   nombreVacuna:    z.string().min(2).max(200),
   descripcion:     z.string().max(500).optional(),
-  fabricante:      z.string().max(200).optional(),
   medicamentoId:   z.string().min(1).optional(),
   intervaloDias:   z.number().int().positive(),
   // Categorías a las que aplica (vacío / null = todos los animales)

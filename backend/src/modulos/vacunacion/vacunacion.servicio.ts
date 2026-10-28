@@ -13,7 +13,7 @@ import { motivosNoAplica, cargarEstadoReproductivo, SELECCION_CRITERIOS } from '
 export async function listarCalendarios() {
   return prisma.calendarioVacunacion.findMany({
     include: {
-      medicamento: { select: { id: true, nombre: true, principioActivo: true } },
+      medicamento: { select: { id: true, nombre: true, principioActivo: true, laboratorio: true } },
       _count: { select: { registrosVacunacion: true } },
     },
     orderBy: { nombreVacuna: 'asc' },
@@ -42,7 +42,6 @@ export async function obtenerCalendario(id: string) {
 export interface DatosCalendario {
   nombreVacuna:    string;
   descripcion?:    string;
-  fabricante?:     string;
   medicamentoId?:  string;
   intervaloDias:   number;
   edadMinimasDias?: number | null;

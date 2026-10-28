@@ -609,11 +609,11 @@ model CalendarioVacunacion {
   id                String   @id @default(cuid())
   nombreVacuna      String
   descripcion       String?
-  fabricante        String?
+  // El laboratorio se toma del medicamento asociado (Medicamento.laboratorio).
   intervaloDias     Int      // Cada cuántos días se debe repetir
   // A qué animales aplica (todo vacío/null = a todos). Se usa en el
   // cumplimiento por lote y para advertir al registrar una aplicación.
-  edadMinimasDias   Int?     // Edad mínima en días para aplicar
+  edadMinimasDias   Int?     @map("edad_minima_dias") // Edad mínima en días para aplicar
   edadMaximaDias    Int?     @map("edad_maxima_dias") // Edad máxima en días (p. ej. terneros hasta 180)
   aplicaASexo       Sexo?   // null = ambos sexos
   aplicaAPropositos TipoPropositoAnimal[] @default([]) @map("aplica_a_propositos") // [] = todos

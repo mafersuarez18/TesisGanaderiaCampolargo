@@ -18,14 +18,13 @@ interface CalendarioVacunacion {
   id: string;
   nombreVacuna: string;
   descripcion?: string;
-  fabricante?: string;
   intervaloDias: number;
   edadMinimasDias?: number | null;
   edadMaximaDias?: number | null;
   aplicaASexo?: 'MACHO' | 'HEMBRA' | null;
   aplicaAPropositos?: Proposito[];
   aplicaACondicion?: Condicion | null;
-  medicamento?: { id: string; nombre: string; principioActivo?: string };
+  medicamento?: { id: string; nombre: string; principioActivo?: string; laboratorio?: string | null };
   _count: { registrosVacunacion: number };
 }
 
@@ -98,7 +97,6 @@ interface CumplimientoLote {
 interface FormCalendario {
   nombreVacuna: string;
   descripcion: string;
-  fabricante: string;
   intervaloDias: number;
   edadMinimasDias?: number;
   edadMaximaDias?: number;
@@ -360,7 +358,7 @@ export default function PaginaVacunacion() {
                         </div>
                         <div>
                           <h3 className="font-semibold text-on-surface text-sm leading-tight">{cal.nombreVacuna}</h3>
-                          {cal.fabricante && <p className="text-xs text-on-surface-variant">{cal.fabricante}</p>}
+                          {cal.medicamento?.laboratorio && <p className="text-xs text-on-surface-variant">{cal.medicamento.laboratorio}</p>}
                         </div>
                       </div>
                     </div>
@@ -1062,7 +1060,7 @@ function DetalleCalendario({ calendario, puedeEditar, alCerrar, alVerHistorial, 
       abierto={!!calendario}
       alCerrar={alCerrar}
       titulo={calendario?.nombreVacuna}
-      descripcion={calendario?.fabricante}
+      descripcion={calendario?.medicamento?.laboratorio ?? undefined}
       tamano="lg"
       pie={calendario && (
         <>
@@ -1145,7 +1143,6 @@ function FormularioCalendario({ calendario, onCerrar, onExito }: {
   const [form, setForm] = useState<FormCalendario>({
     nombreVacuna:      calendario?.nombreVacuna ?? '',
     descripcion:       calendario?.descripcion ?? '',
-    fabricante:        calendario?.fabricante ?? '',
     intervaloDias:     calendario?.intervaloDias ?? 365,
     edadMinimasDias:   calendario?.edadMinimasDias ?? undefined,
     edadMaximaDias:    calendario?.edadMaximaDias ?? undefined,
@@ -1163,7 +1160,6 @@ function FormularioCalendario({ calendario, onCerrar, onExito }: {
         nombreVacuna:      datos.nombreVacuna,
         intervaloDias:     datos.intervaloDias,
         descripcion:       datos.descripcion || undefined,
-        fabricante:        datos.fabricante  || undefined,
         edadMinimasDias:   datos.edadMinimasDias ?? null,
         edadMaximaDias:    datos.edadMaximaDias ?? null,
         aplicaASexo:       datos.aplicaASexo || null,
@@ -1242,16 +1238,6 @@ function FormularioCalendario({ calendario, onCerrar, onExito }: {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Fabricante</label>
-                <input
-                  type="text"
-                  value={form.fabricante}
-                  onChange={(e) => setForm((f) => ({ ...f, fabricante: e.target.value }))}
-                  placeholder="Laboratorio"
-                  className="campo-entrada"
-                />
-              </div>
-              <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   Intervalo (días) <span className="text-error">*</span>
                 </label>
@@ -1262,6 +1248,11 @@ function FormularioCalendario({ calendario, onCerrar, onExito }: {
                   className="campo-entrada"
                 />
               </div>
+              {form.intervaloDias > 0 && (
+                <p className="self-end pb-3 text-xs text-on-surface-variant">
+                  Se repite: <strong className="text-on-surface">{formatearIntervalo(form.intervaloDias)}</strong>
+                </p>
+              )}
             </div>
 
             {/* ── A qué animales aplica ── */}
@@ -1468,7 +1459,7 @@ function FormularioRegistro({
                 <option value="">Seleccionar protocolo...</option>
                 {todosCalendarios.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.nombreVacuna}{c.fabricante ? ` — ${c.fabricante}` : ''}
+                    {c.nombreVacuna}{c.medicamento?.laboratorio ? ` — ${c.medicamento.laboratorio}` : ''}
                   </option>
                 ))}
               </select>
