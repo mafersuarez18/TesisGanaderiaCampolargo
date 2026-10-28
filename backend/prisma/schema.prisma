@@ -167,6 +167,17 @@ enum EstadoReproductivo {
   GESTANTE
 }
 
+// Condición reproductiva a la que aplica un calendario de vacunación.
+// GESTANTES = gestación en curso; VACIAS = sin gestación en curso;
+// EN_LACTANCIA = parto en los últimos ~300 días (estimado: el sistema no
+// registra el secado); SECAS = no en lactancia (incluye machos).
+enum CondicionReproductivaVacuna {
+  GESTANTES
+  VACIAS
+  EN_LACTANCIA
+  SECAS
+}
+
 enum TipoDesparasitante {
   ECTOPARASITO
   ENDOPARASITO
@@ -600,8 +611,13 @@ model CalendarioVacunacion {
   descripcion       String?
   fabricante        String?
   intervaloDias     Int      // Cada cuántos días se debe repetir
+  // A qué animales aplica (todo vacío/null = a todos). Se usa en el
+  // cumplimiento por lote y para advertir al registrar una aplicación.
   edadMinimasDias   Int?     // Edad mínima en días para aplicar
+  edadMaximaDias    Int?     @map("edad_maxima_dias") // Edad máxima en días (p. ej. terneros hasta 180)
   aplicaASexo       Sexo?   // null = ambos sexos
+  aplicaAPropositos TipoPropositoAnimal[] @default([]) @map("aplica_a_propositos") // [] = todos
+  aplicaACondicion  CondicionReproductivaVacuna? @map("aplica_a_condicion") // null = cualquiera
 
   medicamentoId String?  @map("medicamento_id")
   medicamento   Medicamento? @relation(fields: [medicamentoId], references: [id])

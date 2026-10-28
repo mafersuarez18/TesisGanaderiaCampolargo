@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { Sexo } from '@prisma/client';
+import { Sexo, TipoPropositoAnimal, CondicionReproductivaVacuna } from '@prisma/client';
 import {
   listarCalendarios,
   obtenerCalendario,
@@ -13,6 +13,7 @@ import {
   listarMedicamentos,
   crearMedicamento,
   obtenerCumplimientoVacunacionPorLote,
+  verificarAplicabilidad,
 } from './vacunacion.servicio';
 import {
   respuestaExito,
@@ -26,15 +27,26 @@ import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/p
 // (animalId) — no depende de que exista una consulta médica previa, ya que
 // una jornada de vacunación en campo normalmente no pasa por una.
 
-const esquemaCalendario = z.object({
+const esquemaCalendarioBase = z.object({
   nombreVacuna:    z.string().min(2).max(200),
   descripcion:     z.string().max(500).optional(),
   fabricante:      z.string().max(200).optional(),
   medicamentoId:   z.string().min(1).optional(),
   intervaloDias:   z.number().int().positive(),
-  edadMinimasDias: z.number().int().min(0).optional(),
+  // Categorías a las que aplica (vacío / null = todos los animales)
+  edadMinimasDias: z.number().int().min(0).nullable().optional(),
+  edadMaximaDias:  z.number().int().min(0).nullable().optional(),
   aplicaASexo:     z.nativeEnum(Sexo).nullable().optional(),
+  aplicaAPropositos: z.array(z.nativeEnum(TipoPropositoAnimal)).optional(),
+  aplicaACondicion:  z.nativeEnum(CondicionReproductivaVacuna).nullable().optional(),
 });
+
+const rangoEdadValido = <T extends { edadMinimasDias?: number | null; edadMaximaDias?: number | null }>(d: T) =>
+  d.edadMinimasDias == null || d.edadMaximaDias == null || d.edadMaximaDias >= d.edadMinimasDias;
+const errorRangoEdad = { message: 'La edad máxima no puede ser menor que la mínima', path: ['edadMaximaDias'] };
+
+const esquemaCalendario = esquemaCalendarioBase.refine(rangoEdadValido, errorRangoEdad);
+const esquemaActualizarCalendario = esquemaCalendarioBase.partial().refine(rangoEdadValido, errorRangoEdad);
 
 const esquemaRegistro = z.object({
   animalId:               z.string().min(1, 'El animal es requerido'),
@@ -89,7 +101,7 @@ export async function controladorActualizarCalendario(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const datos = esquemaCalendario.partial().parse(req.body);
+    const datos = esquemaActualizarCalendario.parse(req.body);
     const calendario = await actualizarCalendario(req.params['id'] as string, datos);
     return respuestaExito(res, calendario);
   } catch (error) { return next(error); }
@@ -184,5 +196,15 @@ export async function controladorCumplimientoPorLote(
   try {
     const cumplimiento = await obtenerCumplimientoVacunacionPorLote();
     return respuestaExito(res, cumplimiento);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorVerificarAplicabilidad(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const { animalId } = z.object({ animalId: z.string().min(1) }).parse(req.query);
+    const resultado = await verificarAplicabilidad(req.params['id'] as string, animalId);
+    return respuestaExito(res, resultado);
   } catch (error) { return next(error); }
 }

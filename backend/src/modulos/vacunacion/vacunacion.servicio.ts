@@ -1,7 +1,8 @@
-import { Prisma, Sexo, EstadoAnimal } from '@prisma/client';
+import { Prisma, Sexo, EstadoAnimal, TipoPropositoAnimal, CondicionReproductivaVacuna } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 import { ErrorNoEncontrado, ErrorConflicto } from '../../compartido/tipos/respuesta';
 import { resolverNotificacionesDeEntidad } from '../notificaciones/notificaciones.servicio';
+import { motivosNoAplica, cargarEstadoReproductivo, SELECCION_CRITERIOS } from './aplicabilidad';
 
 // Al registrar una vacunación se calcula automáticamente proximaFecha
 // (fecha + intervaloDias del calendario), que es lo que luego usa el motor
@@ -44,8 +45,11 @@ export interface DatosCalendario {
   fabricante?:     string;
   medicamentoId?:  string;
   intervaloDias:   number;
-  edadMinimasDias?: number;
+  edadMinimasDias?: number | null;
+  edadMaximaDias?:  number | null;
   aplicaASexo?:    Sexo | null;
+  aplicaAPropositos?: TipoPropositoAnimal[];
+  aplicaACondicion?:  CondicionReproductivaVacuna | null;
 }
 
 export async function crearCalendario(datos: DatosCalendario) {
@@ -138,6 +142,28 @@ export interface DatosRegistroVacunacion {
   lote?:                  string;
   observaciones?:         string;
   aplicadoPorId:          string;
+}
+
+// Si el calendario le corresponde al animal según sus categorías; el
+// formulario de aplicación lo consulta para advertir antes de guardar.
+export async function verificarAplicabilidad(calendarioId: string, animalId: string) {
+  const [calendario, animal] = await Promise.all([
+    prisma.calendarioVacunacion.findUnique({ where: { id: calendarioId }, select: SELECCION_CRITERIOS }),
+    prisma.animal.findUnique({
+      where: { id: animalId },
+      select: { id: true, sexo: true, fechaNacimiento: true, proposito: true },
+    }),
+  ]);
+  if (!calendario) throw new ErrorNoEncontrado('Calendario de vacunación');
+  if (!animal) throw new ErrorNoEncontrado('Animal');
+
+  const { gestantes, ultimoParto } = await cargarEstadoReproductivo([animal.id]);
+  const motivos = motivosNoAplica(calendario, {
+    ...animal,
+    gestante: gestantes.has(animal.id),
+    ultimoParto: ultimoParto.get(animal.id) ?? null,
+  });
+  return { aplica: motivos.length === 0, motivos };
 }
 
 export async function registrarVacunacion(datos: DatosRegistroVacunacion) {
@@ -244,9 +270,10 @@ export async function crearMedicamento(datos: DatosCrearMedicamento) {
 }
 
 // ─── Cumplimiento del calendario de vacunación por lote ───────────────────────
-// Para cada lote, sobre cada par (animal activo, calendario aplicable a su
-// sexo), se considera "al día" cuando existe un RegistroVacunacion cuya
-// próxima fecha aún no venció. El cumplimiento es el % de esos pares al día.
+// Para cada lote, sobre cada par (animal activo, calendario que le aplica
+// según sexo, edad, propósito y condición reproductiva — ver aplicabilidad.ts),
+// se considera "al día" cuando existe un RegistroVacunacion cuya próxima
+// fecha aún no venció. El cumplimiento es el % de esos pares al día.
 
 export async function obtenerCumplimientoVacunacionPorLote() {
   const [lotes, calendarios] = await Promise.all([
@@ -254,17 +281,21 @@ export async function obtenerCumplimientoVacunacionPorLote() {
       select: {
         id: true,
         nombre: true,
+        finca: { select: { id: true, nombre: true } },
         animales: {
           where: { estado: EstadoAnimal.ACTIVO },
-          select: { id: true, sexo: true },
+          select: { id: true, sexo: true, fechaNacimiento: true, proposito: true },
         },
       },
-      orderBy: { nombre: 'asc' },
+      orderBy: [{ finca: { nombre: 'asc' } }, { nombre: 'asc' }],
     }),
     prisma.calendarioVacunacion.findMany({
-      select: { id: true, nombreVacuna: true, aplicaASexo: true },
+      select: { id: true, nombreVacuna: true, ...SELECCION_CRITERIOS },
     }),
   ]);
+  const { gestantes, ultimoParto } = await cargarEstadoReproductivo(
+    lotes.flatMap((l) => l.animales.filter((a) => a.sexo === 'HEMBRA').map((a) => a.id)),
+  );
 
   const registros = await prisma.registroVacunacion.findMany({
     select: { calendarioVacunacionId: true, proximaFecha: true, animalId: true },
@@ -288,8 +319,13 @@ export async function obtenerCumplimientoVacunacionPorLote() {
     let paresAlDia = 0;
 
     for (const animal of lote.animales) {
+      const perfil = {
+        ...animal,
+        gestante: gestantes.has(animal.id),
+        ultimoParto: ultimoParto.get(animal.id) ?? null,
+      };
       for (const cal of calendarios) {
-        if (cal.aplicaASexo && cal.aplicaASexo !== animal.sexo) continue;
+        if (motivosNoAplica(cal, perfil, hoy).length) continue;
         paresEsperados += 1;
         const proximaFecha = ultimaProximaFecha.get(`${animal.id}::${cal.id}`);
         if (proximaFecha === undefined) continue; // nunca aplicado -> pendiente
@@ -300,6 +336,8 @@ export async function obtenerCumplimientoVacunacionPorLote() {
     return {
       loteId: lote.id,
       loteNombre: lote.nombre,
+      fincaId: lote.finca.id,
+      fincaNombre: lote.finca.nombre,
       totalAnimales: lote.animales.length,
       paresEsperados,
       paresAlDia,

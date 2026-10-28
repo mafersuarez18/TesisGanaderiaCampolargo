@@ -16,6 +16,7 @@ import {
   controladorListarMedicamentos,
   controladorCrearMedicamento,
   controladorCumplimientoPorLote,
+  controladorVerificarAplicabilidad,
 } from './vacunacion.controlador';
 
 const enrutador = Router();
@@ -35,6 +36,9 @@ enrutador.post('/medicamentos', requerirPrivilegio('vacunacion.registrar'), regi
 // Calendarios de vacunación
 enrutador.get('/calendarios', requerirPrivilegio('vacunacion.ver'), controladorListarCalendarios);
 enrutador.get('/calendarios/:id', requerirPrivilegio('vacunacion.ver'), controladorObtenerCalendario);
+// GET /api/vacunacion/calendarios/:id/aplica?animalId= — si el calendario le
+// corresponde al animal (sexo, edad, propósito, condición reproductiva)
+enrutador.get('/calendarios/:id/aplica', requerirPrivilegio('vacunacion.ver'), controladorVerificarAplicabilidad);
 enrutador.post('/calendarios', requerirPrivilegio('vacunacion.gestionar_calendario'), registrarAuditoria('Crear calendario vacunación', 'CalendarioVacunacion'), controladorCrearCalendario);
 enrutador.patch('/calendarios/:id', requerirPrivilegio('vacunacion.gestionar_calendario'), registrarAuditoria('Actualizar calendario vacunación', 'CalendarioVacunacion'), controladorActualizarCalendario);
 

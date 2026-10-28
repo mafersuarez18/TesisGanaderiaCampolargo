@@ -256,10 +256,11 @@ Subdivisión de cada finca en agrupaciones de animales (potreros de manejo):
 
 ### 6. Vacunación y desparasitación
 
-- Calendarios de vacunación con intervalo de reaplicación, edad mínima y sexo al que aplican
-- Registro de aplicaciones con fecha, dosis, vía y lote de producto; próxima fecha calculada automáticamente
+- Calendarios de vacunación con intervalo de reaplicación y las categorías de animales a las que aplican: sexo, rango de edad (mínima y máxima), propósito (uno o varios) y condición reproductiva (gestantes, vacías, en lactancia o secos). "En lactancia" se estima como parto en los últimos 300 días, ya que el sistema no registra el secado
+- Cada calendario tiene una vista de detalle (frecuencia, medicamento, categorías, indicaciones), desde la que se edita o se consulta su historial de aplicaciones
+- Registro de aplicaciones con fecha, dosis, vía y lote de producto; próxima fecha calculada automáticamente. Si el protocolo no le corresponde al animal elegido, el formulario lo advierte con el motivo (sin impedir el registro)
 - Selector de medicamento con patrón "buscar o crear"
-- Indicador de cumplimiento del calendario por lote
+- Indicador de cumplimiento del calendario por lote, que solo exige a cada animal los calendarios que le corresponden según sus categorías
 
 ### 7. Reproducción
 
@@ -611,6 +612,7 @@ La API está disponible en `http://localhost:3001/api`.
 | PATCH | `/historial-medico/pruebas-complementarias/:id` | Registrar o corregir el resultado de una prueba complementaria |
 | PATCH | `/historial-medico/tratamientos/:id/finalizar` | Cerrar un tratamiento indicando si el animal mejoró |
 | GET | `/vacunacion/calendarios` | Listar calendarios de vacunación |
+| GET | `/vacunacion/calendarios/:id/aplica?animalId=` | Si el calendario le corresponde al animal y, si no, por qué |
 | GET / POST | `/vacunacion/medicamentos` | Catálogo de medicamentos |
 | GET | `/vacunacion` | Listar registros de vacunación |
 | PATCH / DELETE | `/vacunacion/:id` | Editar / eliminar un registro de vacunación |

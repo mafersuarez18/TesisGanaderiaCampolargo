@@ -8,7 +8,7 @@ import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import Icono from '../../componentes/ui/Icono';
 import FiltroAnimal from '../../componentes/ui/FiltroAnimal';
-import { ModalConfirmacion } from '../../componentes/ui/Modal';
+import Modal, { ModalConfirmacion } from '../../componentes/ui/Modal';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 
@@ -20,10 +20,54 @@ interface CalendarioVacunacion {
   descripcion?: string;
   fabricante?: string;
   intervaloDias: number;
-  edadMinimasDias?: number;
+  edadMinimasDias?: number | null;
+  edadMaximaDias?: number | null;
   aplicaASexo?: 'MACHO' | 'HEMBRA' | null;
+  aplicaAPropositos?: Proposito[];
+  aplicaACondicion?: Condicion | null;
   medicamento?: { id: string; nombre: string; principioActivo?: string };
   _count: { registrosVacunacion: number };
+}
+
+type Proposito = 'CARNE' | 'LECHE' | 'CARNE_LECHE' | 'REPRODUCCION' | 'TAUROMAQUIA';
+type Condicion = 'GESTANTES' | 'VACIAS' | 'EN_LACTANCIA' | 'SECAS';
+
+const ETIQUETA_PROPOSITO: Record<Proposito, string> = {
+  CARNE: 'Carne', LECHE: 'Leche', CARNE_LECHE: 'Doble propósito',
+  REPRODUCCION: 'Reproducción', TAUROMAQUIA: 'Tauromaquia',
+};
+const ETIQUETA_CONDICION: Record<Condicion, string> = {
+  GESTANTES: 'Hembras gestantes',
+  VACIAS: 'Hembras vacías (no gestantes)',
+  EN_LACTANCIA: 'Hembras en lactancia',
+  SECAS: 'Animales secos (no en lactancia)',
+};
+
+/** Edad en días expresada en la unidad más natural: "45 días", "6 meses", "2 años". */
+function formatearEdad(dias: number): string {
+  if (dias < 60) return `${dias} día${dias === 1 ? '' : 's'}`;
+  if (dias % 365 === 0) return `${dias / 365} año${dias === 365 ? '' : 's'}`;
+  const meses = Math.round(dias / 30);
+  return `${meses} meses`;
+}
+
+/** Categorías de animales a las que aplica un calendario, en texto. Vacío = todos. */
+function describirCategorias(cal: CalendarioVacunacion): { icono: string; texto: string }[] {
+  const lista: { icono: string; texto: string }[] = [];
+  if (cal.aplicaASexo) lista.push({ icono: 'wc', texto: cal.aplicaASexo === 'MACHO' ? 'Solo machos' : 'Solo hembras' });
+  const min = cal.edadMinimasDias || null; // 0 equivale a "sin mínimo"
+  const max = cal.edadMaximaDias ?? null;
+  if (min != null && max != null) lista.push({ icono: 'cake', texto: `De ${formatearEdad(min)} a ${formatearEdad(max)}` });
+  else if (min != null) lista.push({ icono: 'cake', texto: `Desde ${formatearEdad(min)}` });
+  else if (max != null) lista.push({ icono: 'cake', texto: `Hasta ${formatearEdad(max)}` });
+  if (cal.aplicaAPropositos?.length) {
+    lista.push({ icono: 'category', texto: cal.aplicaAPropositos.map((p) => ETIQUETA_PROPOSITO[p]).join(' o ') });
+  }
+  if (cal.aplicaACondicion) {
+    const icono = { GESTANTES: 'vaca_prenada', VACIAS: 'female', EN_LACTANCIA: 'water_drop', SECAS: 'format_color_reset' }[cal.aplicaACondicion];
+    lista.push({ icono, texto: ETIQUETA_CONDICION[cal.aplicaACondicion] });
+  }
+  return lista;
 }
 
 interface RegistroVacunacion {
@@ -43,6 +87,8 @@ interface RegistroVacunacion {
 interface CumplimientoLote {
   loteId: string;
   loteNombre: string;
+  fincaId: string;
+  fincaNombre: string;
   totalAnimales: number;
   paresEsperados: number;
   paresAlDia: number;
@@ -55,7 +101,10 @@ interface FormCalendario {
   fabricante: string;
   intervaloDias: number;
   edadMinimasDias?: number;
+  edadMaximaDias?: number;
   aplicaASexo: '' | 'MACHO' | 'HEMBRA';
+  aplicaAPropositos: Proposito[];
+  aplicaACondicion: '' | Condicion;
 }
 
 interface FormRegistro {
@@ -95,6 +144,8 @@ export default function PaginaVacunacion() {
     animalIdFiltro ? 'registros' : 'calendarios',
   );
   const [calendarioActivo, setCalendarioActivo]         = useState<CalendarioVacunacion | null>(null);
+  const [calendarioDetalle, setCalendarioDetalle]       = useState<CalendarioVacunacion | null>(null);
+  const [calendarioEditar, setCalendarioEditar]         = useState<CalendarioVacunacion | null>(null);
   const [mostrarFormCalendario, setMostrarFormCalendario] = useState(false);
   const [mostrarFormRegistro, setMostrarFormRegistro]   = useState(false);
   const [registroSeleccionado, setRegistroSeleccionado] = useState<RegistroVacunacion | null>(null);
@@ -299,7 +350,7 @@ export default function PaginaVacunacion() {
                     key={cal.id}
                     initial={{ opacity: 0, y: 12 }}
                     animate={{ opacity: 1, y: 0 }}
-                    onClick={() => { setCalendarioActivo(cal); setPestanaActiva('registros'); }}
+                    onClick={() => setCalendarioDetalle(cal)}
                     className="tarjeta-vidrio rounded-2xl p-5 flex flex-col gap-3 cursor-pointer group"
                   >
                     <div className="flex items-start justify-between">
@@ -323,23 +374,41 @@ export default function PaginaVacunacion() {
                         <Icono nombre="schedule" clase="text-[14px] text-primary" />
                         <span>{formatearIntervalo(cal.intervaloDias)}</span>
                       </div>
-                      {cal.aplicaASexo && (
-                        <div className="flex items-center gap-1.5">
-                          <Icono nombre="person" clase="text-[14px] text-secondary" />
-                          <span>Solo {cal.aplicaASexo === 'MACHO' ? 'machos' : 'hembras'}</span>
-                        </div>
-                      )}
                       <div className="flex items-center gap-1.5">
                         <Icono nombre="check_circle" relleno clase="text-[14px] text-primary" />
                         <span>{cal._count.registrosVacunacion} aplicaciones</span>
                       </div>
                     </div>
 
-                    <div className="mt-auto pt-3 border-t border-outline-variant/20 flex items-center justify-between">
-                      <span className="text-xs text-on-surface-variant truncate">
-                        {cal.medicamento?.nombre ?? 'Sin medicamento asignado'}
-                      </span>
-                      <Icono nombre="chevron_right" clase="text-[18px] text-outline group-hover:text-primary transition-colors" />
+                    {/* A qué animales aplica */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {(describirCategorias(cal).length ? describirCategorias(cal) : [{ icono: 'pets', texto: 'Todos los animales' }])
+                        .map((c) => (
+                          <span key={c.texto} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary/10 text-[11px] text-on-surface-variant">
+                            <Icono nombre={c.icono} clase="text-[12px] text-secondary" />
+                            {c.texto}
+                          </span>
+                        ))}
+                    </div>
+
+                    <div className="mt-auto pt-3 border-t border-outline-variant/20 flex items-center justify-end gap-2">
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setCalendarioDetalle(cal); }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
+                        >
+                          Ver detalle
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setCalendarioActivo(cal); setPestanaActiva('registros'); }}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
+                        >
+                          <Icono nombre="history" clase="text-[14px]" />
+                          Historial
+                        </button>
+                      </div>
                     </div>
                   </motion.div>
                 ))}
@@ -696,20 +765,24 @@ export default function PaginaVacunacion() {
             ) : (
               <div className="tarjeta-vidrio rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto">
-                <div className="min-w-[480px]">
-                <div className="grid grid-cols-[1fr_90px_90px_110px] gap-3 px-5 py-3 bg-surface-container-low border-b border-outline-variant/20 text-[10px] font-semibold text-on-surface-variant uppercase tracking-wide">
-                  {['Lote', 'Animales', 'Al día', 'Cumplimiento'].map((h) => (
-                    <span key={h} className={h === 'Lote' ? '' : 'text-center'}>{h}</span>
+                <div className="min-w-[620px]">
+                <div className="grid grid-cols-[1fr_1fr_90px_90px_110px] gap-3 px-5 py-3 bg-surface-container-low border-b border-outline-variant/20 text-[10px] font-semibold text-on-surface-variant uppercase tracking-wide">
+                  {['Lote', 'Finca', 'Animales', 'Al día', 'Cumplimiento'].map((h) => (
+                    <span key={h} className={h === 'Lote' || h === 'Finca' ? '' : 'text-center'}>{h}</span>
                   ))}
                 </div>
                 {cumplimientoPorLote.map((l, idx) => (
                   <div
                     key={l.loteId}
-                    className={`grid grid-cols-[1fr_90px_90px_110px] gap-3 items-center px-5 py-3.5 text-sm
+                    className={`grid grid-cols-[1fr_1fr_90px_90px_110px] gap-3 items-center px-5 py-3.5 text-sm
                       hover:bg-surface-container-low transition-colors
                       ${idx < cumplimientoPorLote.length - 1 ? 'border-b border-outline-variant/10' : ''}`}
                   >
                     <span className="font-semibold text-on-surface">{l.loteNombre}</span>
+                    <span className="text-on-surface-variant flex items-center gap-1.5">
+                      <Icono nombre="agriculture" clase="text-[15px] text-outline" />
+                      {l.fincaNombre}
+                    </span>
                     <span className="text-center text-on-surface-variant">{l.totalAnimales}</span>
                     <span className="text-center text-on-surface-variant">{l.paresAlDia}/{l.paresEsperados}</span>
                     <span className="text-center">
@@ -726,6 +799,7 @@ export default function PaginaVacunacion() {
             <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5 mt-3">
               <Icono nombre="info" clase="text-[13px]" />
               Cumplimiento = pares animal-calendario al día (sin vacuna vencida) sobre el total de pares aplicables en el lote.
+              Cada animal solo cuenta para los calendarios que le corresponden según su sexo, edad, propósito y condición reproductiva.
             </p>
           </motion.div>
         ) : (
@@ -898,14 +972,30 @@ export default function PaginaVacunacion() {
         )}
       </AnimatePresence>
 
-      {/* Modal: Nuevo Calendario */}
+      {/* Modal: Detalle del calendario */}
+      <DetalleCalendario
+        calendario={calendarioDetalle}
+        puedeEditar={puedeEditar}
+        alCerrar={() => setCalendarioDetalle(null)}
+        alVerHistorial={(cal) => {
+          setCalendarioDetalle(null);
+          setCalendarioActivo(cal);
+          setPestanaActiva('registros');
+        }}
+        alEditar={(cal) => { setCalendarioDetalle(null); setCalendarioEditar(cal); }}
+      />
+
+      {/* Modal: Nuevo / editar calendario */}
       <AnimatePresence>
-        {mostrarFormCalendario && (
+        {(mostrarFormCalendario || calendarioEditar) && (
           <FormularioCalendario
-            onCerrar={() => setMostrarFormCalendario(false)}
+            calendario={calendarioEditar ?? undefined}
+            onCerrar={() => { setMostrarFormCalendario(false); setCalendarioEditar(null); }}
             onExito={() => {
               queryClient.invalidateQueries({ queryKey: ['calendarios-vacunacion'] });
+              queryClient.invalidateQueries({ queryKey: ['cumplimiento-vacunacion-lote'] });
               setMostrarFormCalendario(false);
+              setCalendarioEditar(null);
             }}
           />
         )}
@@ -916,6 +1006,7 @@ export default function PaginaVacunacion() {
         {mostrarFormRegistro && (
           <FormularioRegistro
             calendarioPredeterminado={calendarioActivo ?? undefined}
+            animalPredeterminado={animalIdFiltro}
             todosCalendarios={calendarios ?? []}
             onCerrar={() => setMostrarFormRegistro(false)}
             onExito={() => {
@@ -956,25 +1047,143 @@ export default function PaginaVacunacion() {
   );
 }
 
-// ── Formulario: Nuevo Calendario ──────────────────────────────────────────────
+// ── Detalle de un calendario ──────────────────────────────────────────────────
 
-function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onExito: () => void }) {
+function DetalleCalendario({ calendario, puedeEditar, alCerrar, alVerHistorial, alEditar }: {
+  calendario: CalendarioVacunacion | null;
+  puedeEditar: boolean;
+  alCerrar: () => void;
+  alVerHistorial: (cal: CalendarioVacunacion) => void;
+  alEditar: (cal: CalendarioVacunacion) => void;
+}) {
+  const categorias = calendario ? describirCategorias(calendario) : [];
+  return (
+    <Modal
+      abierto={!!calendario}
+      alCerrar={alCerrar}
+      titulo={calendario?.nombreVacuna}
+      descripcion={calendario?.fabricante}
+      tamano="lg"
+      pie={calendario && (
+        <>
+          {puedeEditar && (
+            <button type="button" onClick={() => alEditar(calendario)} className="boton boton-secundario gap-2 text-sm">
+              <Icono nombre="edit" clase="text-[16px]" />
+              Editar
+            </button>
+          )}
+          <button type="button" onClick={() => alVerHistorial(calendario)} className="boton boton-primario gap-2 text-sm">
+            <Icono nombre="history" clase="text-[16px]" />
+            Ver historial de aplicaciones
+          </button>
+        </>
+      )}
+    >
+      {calendario && (
+        <div className="space-y-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              { et: 'Frecuencia', val: formatearIntervalo(calendario.intervaloDias), ico: 'schedule' },
+              { et: 'Medicamento', val: calendario.medicamento?.nombre ?? 'Sin asignar', ico: 'medication' },
+              { et: 'Aplicaciones', val: String(calendario._count.registrosVacunacion), ico: 'check_circle' },
+            ].map((d) => (
+              <div key={d.et} className="p-3 rounded-xl bg-surface-container">
+                <p className="text-[10px] uppercase font-semibold tracking-wider text-on-surface-variant flex items-center gap-1">
+                  <Icono nombre={d.ico} clase="text-[13px]" /> {d.et}
+                </p>
+                <p className="font-semibold text-on-surface mt-0.5">{d.val}</p>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-2">A qué animales aplica</p>
+            {categorias.length ? (
+              <ul className="space-y-1.5">
+                {categorias.map((c) => (
+                  <li key={c.texto} className="flex items-center gap-2 text-on-surface">
+                    <Icono nombre={c.icono} clase="text-[16px] text-secondary" />
+                    {c.texto}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-on-surface flex items-center gap-2">
+                <Icono nombre="pets" clase="text-[16px] text-secondary" />
+                Todos los animales
+              </p>
+            )}
+            {(calendario.aplicaACondicion === 'EN_LACTANCIA' || calendario.aplicaACondicion === 'SECAS') && (
+              <p className="text-[11px] text-on-surface-variant mt-2">
+                "En lactancia" se estima como parto en los últimos 300 días, porque el sistema no registra el secado.
+              </p>
+            )}
+          </div>
+
+          {calendario.descripcion && (
+            <div>
+              <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">Indicaciones</p>
+              <p className="text-on-surface-variant leading-relaxed whitespace-pre-line">{calendario.descripcion}</p>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── Formulario: Nuevo / editar calendario ─────────────────────────────────────
+
+const PROPOSITOS: Proposito[] = ['CARNE', 'LECHE', 'CARNE_LECHE', 'REPRODUCCION', 'TAUROMAQUIA'];
+
+function FormularioCalendario({ calendario, onCerrar, onExito }: {
+  calendario?: CalendarioVacunacion;
+  onCerrar: () => void;
+  onExito: () => void;
+}) {
+  const esEdicion = !!calendario;
   const [form, setForm] = useState<FormCalendario>({
-    nombreVacuna: '', descripcion: '', fabricante: '', intervaloDias: 365, aplicaASexo: '',
+    nombreVacuna:      calendario?.nombreVacuna ?? '',
+    descripcion:       calendario?.descripcion ?? '',
+    fabricante:        calendario?.fabricante ?? '',
+    intervaloDias:     calendario?.intervaloDias ?? 365,
+    edadMinimasDias:   calendario?.edadMinimasDias ?? undefined,
+    edadMaximaDias:    calendario?.edadMaximaDias ?? undefined,
+    aplicaASexo:       calendario?.aplicaASexo ?? '',
+    aplicaAPropositos: calendario?.aplicaAPropositos ?? [],
+    aplicaACondicion:  calendario?.aplicaACondicion ?? '',
   });
   const [error, setError] = useState('');
 
   const mutacion = useMutation({
-    mutationFn: (datos: FormCalendario) =>
-      clienteHttp.post('/vacunacion/calendarios', {
-        ...datos,
-        aplicaASexo: datos.aplicaASexo || null,
-        descripcion: datos.descripcion || undefined,
-        fabricante:  datos.fabricante  || undefined,
-      }),
+    mutationFn: (datos: FormCalendario) => {
+      // En la edición los campos vacíos se envían como null para poder
+      // quitar una restricción que antes estaba puesta.
+      const cuerpo = {
+        nombreVacuna:      datos.nombreVacuna,
+        intervaloDias:     datos.intervaloDias,
+        descripcion:       datos.descripcion || undefined,
+        fabricante:        datos.fabricante  || undefined,
+        edadMinimasDias:   datos.edadMinimasDias ?? null,
+        edadMaximaDias:    datos.edadMaximaDias ?? null,
+        aplicaASexo:       datos.aplicaASexo || null,
+        aplicaAPropositos: datos.aplicaAPropositos,
+        aplicaACondicion:  datos.aplicaACondicion || null,
+      };
+      return esEdicion
+        ? clienteHttp.patch(`/vacunacion/calendarios/${calendario!.id}`, cuerpo)
+        : clienteHttp.post('/vacunacion/calendarios', cuerpo);
+    },
     onSuccess: () => onExito(),
-    onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'Error al crear el calendario'),
+    onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'Error al guardar el calendario'),
   });
+
+  const alternarProposito = (p: Proposito) => setForm((f) => ({
+    ...f,
+    aplicaAPropositos: f.aplicaAPropositos.includes(p)
+      ? f.aplicaAPropositos.filter((x) => x !== p)
+      : [...f.aplicaAPropositos, p],
+  }));
 
   return (
     <>
@@ -993,7 +1202,7 @@ function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onE
           <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
             <h2 className="font-bold text-on-surface flex items-center gap-2">
               <Icono nombre="vaccines" relleno clase="text-[20px] text-primary" />
-              Nuevo Calendario de Vacunación
+              {esEdicion ? 'Editar Calendario de Vacunación' : 'Nuevo Calendario de Vacunación'}
             </h2>
             <button onClick={onCerrar} className="p-2 hover:bg-surface-container rounded-xl transition-colors">
               <Icono nombre="close" clase="text-[20px] text-on-surface-variant" />
@@ -1003,6 +1212,9 @@ function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onE
             onSubmit={(e) => {
               e.preventDefault();
               if (!form.nombreVacuna.trim()) { setError('El nombre de la vacuna es requerido'); return; }
+              if (form.edadMinimasDias != null && form.edadMaximaDias != null && form.edadMaximaDias < form.edadMinimasDias) {
+                setError('La edad máxima no puede ser menor que la mínima'); return;
+              }
               setError('');
               mutacion.mutate(form);
             }}
@@ -1050,28 +1262,90 @@ function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onE
                   className="campo-entrada"
                 />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Edad mínima (días)</label>
-                <input
-                  type="number" min={0}
-                  value={form.edadMinimasDias ?? ''}
-                  onChange={(e) => setForm((f) => ({ ...f, edadMinimasDias: e.target.value ? Number(e.target.value) : undefined }))}
-                  placeholder="Sin restricción"
-                  className="campo-entrada"
-                />
+            </div>
+
+            {/* ── A qué animales aplica ── */}
+            <div className="p-4 rounded-xl bg-surface-container space-y-3">
+              <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
+                A qué animales aplica <span className="normal-case font-normal">(en blanco = todos)</span>
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {([
+                  { campo: 'edadMinimasDias', et: 'Edad mínima (días)', ph: 'Sin mínimo' },
+                  { campo: 'edadMaximaDias',  et: 'Edad máxima (días)', ph: 'Sin máximo' },
+                ] as const).map(({ campo, et, ph }) => (
+                  <div key={campo}>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">{et}</label>
+                    <input
+                      type="number" min={0}
+                      value={form[campo] ?? ''}
+                      onChange={(e) => setForm((f) => ({ ...f, [campo]: e.target.value ? Number(e.target.value) : undefined }))}
+                      placeholder={ph}
+                      className="campo-entrada"
+                    />
+                    {!!form[campo] && (
+                      <p className="text-[11px] text-on-surface-variant mt-1">≈ {formatearEdad(form[campo]!)}</p>
+                    )}
+                  </div>
+                ))}
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Sexo</label>
+                  <select
+                    value={form.aplicaASexo}
+                    onChange={(e) => setForm((f) => ({ ...f, aplicaASexo: e.target.value as '' | 'MACHO' | 'HEMBRA' }))}
+                    className="campo-entrada"
+                  >
+                    <option value="">Ambos sexos</option>
+                    <option value="MACHO">Solo machos</option>
+                    <option value="HEMBRA">Solo hembras</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Condición reproductiva</label>
+                  <select
+                    value={form.aplicaACondicion}
+                    onChange={(e) => setForm((f) => ({ ...f, aplicaACondicion: e.target.value as '' | Condicion }))}
+                    className="campo-entrada"
+                  >
+                    <option value="">Cualquiera</option>
+                    <option value="GESTANTES">Solo hembras gestantes</option>
+                    <option value="VACIAS">Solo hembras vacías</option>
+                    <option value="EN_LACTANCIA">Solo hembras en lactancia</option>
+                    <option value="SECAS">Solo animales secos (no en lactancia)</option>
+                  </select>
+                </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Aplica a Sexo</label>
-                <select
-                  value={form.aplicaASexo}
-                  onChange={(e) => setForm((f) => ({ ...f, aplicaASexo: e.target.value as '' | 'MACHO' | 'HEMBRA' }))}
-                  className="campo-entrada"
-                >
-                  <option value="">Ambos sexos</option>
-                  <option value="MACHO">Solo machos</option>
-                  <option value="HEMBRA">Solo hembras</option>
-                </select>
+                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Propósito</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PROPOSITOS.map((p) => {
+                    const activo = form.aplicaAPropositos.includes(p);
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        aria-pressed={activo}
+                        onClick={() => alternarProposito(p)}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          activo
+                            ? 'bg-primary text-on-primary border-primary'
+                            : 'border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-lowest'
+                        }`}
+                      >
+                        {ETIQUETA_PROPOSITO[p]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-on-surface-variant mt-1">
+                  {form.aplicaAPropositos.length ? 'Solo los propósitos marcados.' : 'Sin marcar = todos los propósitos.'}
+                </p>
               </div>
+              {(form.aplicaACondicion === 'EN_LACTANCIA' || form.aplicaACondicion === 'SECAS') && (
+                <p className="text-[11px] text-on-surface-variant">
+                  "En lactancia" se estima como parto en los últimos 300 días, porque el sistema no registra el secado.
+                </p>
+              )}
             </div>
 
             <div>
@@ -1088,7 +1362,7 @@ function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onE
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={onCerrar} className="flex-1 boton boton-secundario">Cancelar</button>
               <button type="submit" disabled={mutacion.isPending} className="flex-1 boton boton-primario">
-                {mutacion.isPending ? 'Guardando...' : 'Crear calendario'}
+                {mutacion.isPending ? 'Guardando...' : esEdicion ? 'Guardar cambios' : 'Crear calendario'}
               </button>
             </div>
           </form>
@@ -1101,17 +1375,18 @@ function FormularioCalendario({ onCerrar, onExito }: { onCerrar: () => void; onE
 // ── Formulario: Registrar Vacunación ──────────────────────────────────────────
 
 function FormularioRegistro({
-  calendarioPredeterminado, todosCalendarios, onCerrar, onExito,
+  calendarioPredeterminado, animalPredeterminado, todosCalendarios, onCerrar, onExito,
 }: {
   calendarioPredeterminado?: CalendarioVacunacion;
+  animalPredeterminado?: string;
   todosCalendarios: CalendarioVacunacion[];
   onCerrar: () => void;
   onExito: () => void;
 }) {
   const [form, setForm] = useState<FormRegistro>({
     calendarioVacunacionId: calendarioPredeterminado?.id ?? '',
-    animalId:        '',
-    fechaAplicacion: new Date().toISOString().split('T')[0],
+    animalId:        animalPredeterminado ?? '',
+    fechaAplicacion: fechaLocalISO(),
     dosis: '', viaAdministracion: '', lote: '', observaciones: '',
   });
   const [error, setError] = useState('');
@@ -1131,6 +1406,15 @@ function FormularioRegistro({
     onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'Error al registrar la vacunación'),
   });
 
+  // Advertencia (no bloquea) si el protocolo no le corresponde al animal
+  // según sus categorías: sexo, edad, propósito o condición reproductiva.
+  const { data: aplicabilidad } = useQuery<{ aplica: boolean; motivos: string[] }>({
+    queryKey: ['vacuna-aplica', form.calendarioVacunacionId, form.animalId],
+    queryFn: () => clienteHttp
+      .get(`/vacunacion/calendarios/${form.calendarioVacunacionId}/aplica`, { params: { animalId: form.animalId }, silencioso: true })
+      .then((r) => r.data.datos),
+    enabled: !!form.calendarioVacunacionId && !!form.animalId,
+  });
 
   return (
     <>
@@ -1197,6 +1481,19 @@ function FormularioRegistro({
               alSeleccionar={(id) => setForm((f) => ({ ...f, animalId: id }))}
               placeholder="Buscar por identificación o nombre..."
             />
+
+            {aplicabilidad && !aplicabilidad.aplica && (
+              <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                <Icono nombre="warning" clase="text-[18px] flex-shrink-0" />
+                <div>
+                  <p className="font-semibold">Este protocolo no le corresponde a este animal:</p>
+                  <ul className="list-disc ml-4 mt-0.5">
+                    {aplicabilidad.motivos.map((m) => <li key={m}>{m}</li>)}
+                  </ul>
+                  <p className="mt-1">Puede registrarlo igualmente si es lo indicado.</p>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
