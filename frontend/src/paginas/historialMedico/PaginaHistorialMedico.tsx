@@ -8,6 +8,7 @@ import Badge from '../../componentes/ui/Badge';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
 import useDebounce from '../../hooks/useDebounce';
 import Icono from '../../componentes/ui/Icono';
+import FiltroAnimal from '../../componentes/ui/FiltroAnimal';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
@@ -359,6 +360,16 @@ export default function PaginaHistorialMedico() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {animalIdFiltro && (
+        <FiltroAnimal
+          animalId={animalIdFiltro}
+          alQuitar={() => {
+            const p = new URLSearchParams(searchParams); p.delete('animalId');
+            setSearchParams(p); setPaginaActual(1);
+          }}
+        />
+      )}
 
       {/* Timeline de registros */}
       {isLoading ? (

@@ -316,13 +316,22 @@ function EstadisticaHistorial({
   nombre, colorIcono, fondoIcono, etiqueta, valor, href,
 }: { nombre: string; colorIcono: string; fondoIcono: string; etiqueta: string; valor: number; href: string }) {
   return (
-    <Link to={href} className="flex flex-col items-center gap-2 p-3 rounded-xl hover:bg-surface-container-low transition-colors text-center">
+    <Link
+      to={href}
+      title={`Ver ${etiqueta.toLowerCase()} de este animal`}
+      className="group flex flex-col items-center gap-2 p-3 rounded-xl border border-transparent
+                 hover:bg-surface-container-low hover:border-outline-variant/40 transition-colors text-center"
+    >
       <div className={`${fondoIcono} w-10 h-10 rounded-xl flex items-center justify-center`}>
         <Icono nombre={nombre} relleno clase={`text-[18px] ${colorIcono}`} />
       </div>
       <div>
         <p className="text-xl font-bold text-on-surface">{valor}</p>
         <p className="text-[11px] text-outline">{etiqueta}</p>
+        <p className="text-[11px] font-semibold text-primary mt-1 inline-flex items-center gap-0.5
+                      opacity-70 group-hover:opacity-100 transition-opacity">
+          Ver detalle <Icono nombre="chevron_right" clase="text-[14px]" />
+        </p>
       </div>
     </Link>
   );

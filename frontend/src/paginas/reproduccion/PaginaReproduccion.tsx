@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clienteHttp } from '../../servicios/clienteAxios';
@@ -8,6 +8,7 @@ import Paginacion from '../../componentes/ui/Paginacion';
 import Icono from '../../componentes/ui/Icono';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
+import FiltroAnimal from '../../componentes/ui/FiltroAnimal';
 import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
 import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/reproduccion/ModalResultadoParto';
 import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
@@ -113,7 +114,16 @@ const TIPOS_PARA_FILTRO = [
 export default function PaginaReproduccion() {
   const navegar = useNavigate();
   const queryClient = useQueryClient();
-  const [pestana, setPestana]         = useState<'servicios' | 'partos' | 'eventos' | 'indicadores'>('partos');
+  // ?animalId=… (al venir desde la ficha de un animal): abre el historial de
+  // eventos reproductivos filtrado por ese animal.
+  const [parametrosUrl, setParametrosUrl] = useSearchParams();
+  const animalIdFiltro = parametrosUrl.get('animalId') ?? undefined;
+  const quitarFiltroAnimal = () => {
+    const p = new URLSearchParams(parametrosUrl); p.delete('animalId'); setParametrosUrl(p); setPaginaActual(1);
+  };
+  const [pestana, setPestana]         = useState<'servicios' | 'partos' | 'eventos' | 'indicadores'>(
+    animalIdFiltro ? 'eventos' : 'partos',
+  );
   const [tipoFiltro, setTipoFiltro]   = useState('');
   const [paginaActual, setPaginaActual] = useState(1);
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -143,10 +153,15 @@ export default function PaginaReproduccion() {
   });
 
   const { data: eventosData, isLoading: cargandoEventos } = useQuery<RespuestaEventos>({
-    queryKey: ['eventos-reproductivos', paginaActual, tipoFiltro],
+    queryKey: ['eventos-reproductivos', paginaActual, tipoFiltro, animalIdFiltro],
     queryFn: () =>
       clienteHttp.get('/reproduccion', {
-        params: { pagina: paginaActual, porPagina: 25, ...(tipoFiltro && { tipoEvento: tipoFiltro }) },
+        params: {
+          pagina: paginaActual,
+          porPagina: 25,
+          ...(tipoFiltro && { tipoEvento: tipoFiltro }),
+          ...(animalIdFiltro && { animalId: animalIdFiltro }),
+        },
       }).then((r) => r.data),
     enabled: pestana === 'eventos',
   });
@@ -372,6 +387,11 @@ export default function PaginaReproduccion() {
         {/* ── PESTAÑA: EVENTOS ─────────────────────────────────────────────── */}
         {pestana === 'eventos' && (
           <motion.div key="eventos" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            {animalIdFiltro && (
+              <div className="mb-4">
+                <FiltroAnimal animalId={animalIdFiltro} alQuitar={quitarFiltroAnimal} />
+              </div>
+            )}
             <div className="flex flex-wrap gap-2 mb-4">
               {TIPOS_PARA_FILTRO.map((tipo) => {
                 const cfg = TIPO_EVENTO[tipo];

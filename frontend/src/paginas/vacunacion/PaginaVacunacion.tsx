@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clienteHttp } from '../../servicios/clienteAxios';
@@ -6,6 +7,7 @@ import Badge from '../../componentes/ui/Badge';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import Icono from '../../componentes/ui/Icono';
+import FiltroAnimal from '../../componentes/ui/FiltroAnimal';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
@@ -81,8 +83,17 @@ export default function PaginaVacunacion() {
   const queryClient = useQueryClient();
   const { esAdministrador, esVeterinario } = useAutenticacion();
   const puedeEditar = esAdministrador || esVeterinario;
+  // ?animalId=… (al venir desde la ficha de un animal): abre directamente el
+  // historial de aplicaciones filtrado por ese animal.
+  const [parametrosUrl, setParametrosUrl] = useSearchParams();
+  const animalIdFiltro = parametrosUrl.get('animalId') ?? undefined;
+  const quitarFiltroAnimal = () => {
+    const p = new URLSearchParams(parametrosUrl); p.delete('animalId'); setParametrosUrl(p);
+  };
 
-  const [pestanaActiva, setPestanaActiva]               = useState<'calendarios' | 'registros' | 'planes' | 'cumplimiento'>('calendarios');
+  const [pestanaActiva, setPestanaActiva]               = useState<'calendarios' | 'registros' | 'planes' | 'cumplimiento'>(
+    animalIdFiltro ? 'registros' : 'calendarios',
+  );
   const [calendarioActivo, setCalendarioActivo]         = useState<CalendarioVacunacion | null>(null);
   const [mostrarFormCalendario, setMostrarFormCalendario] = useState(false);
   const [mostrarFormRegistro, setMostrarFormRegistro]   = useState(false);
@@ -101,13 +112,14 @@ export default function PaginaVacunacion() {
   });
 
   const { data: respuestaRegistros, isLoading: cargandoRegistros } = useQuery({
-    queryKey: ['registros-vacunacion', calendarioActivo?.id],
+    queryKey: ['registros-vacunacion', calendarioActivo?.id, animalIdFiltro],
     queryFn: () =>
       clienteHttp
         .get('/vacunacion', {
           params: {
             porPagina: 50,
             ...(calendarioActivo && { calendarioVacunacionId: calendarioActivo.id }),
+            ...(animalIdFiltro && { animalId: animalIdFiltro }),
           },
         })
         .then((r) => r.data),
@@ -246,6 +258,10 @@ export default function PaginaVacunacion() {
           ) : null}
         </div>
       </div>
+
+      {pestanaActiva === 'registros' && animalIdFiltro && (
+        <FiltroAnimal animalId={animalIdFiltro} alQuitar={quitarFiltroAnimal} />
+      )}
 
       {/* Contenido por pestaña */}
       <AnimatePresence mode="wait">

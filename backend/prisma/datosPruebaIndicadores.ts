@@ -6,14 +6,15 @@
  *   npm run db:datos-indicadores            → (re)crea los datos de prueba
  *   npm run db:datos-indicadores -- --limpiar → solo los elimina
  *
- * Todo lo que crea queda marcado con MARCA en su campo de observaciones,
- * así que volver a ejecutarlo primero elimina la tanda anterior y no
- * duplica nada.
+ * Los registros se ven como datos reales (sin ninguna marca visible, para
+ * que la demostración no parezca de prueba): el script los reconoce por su
+ * id, que empieza con PREFIJO_ID. Volver a ejecutarlo primero elimina la
+ * tanda anterior y no duplica nada.
  *
  * Qué mueve cada bloque (ver analytics.servicio.ts):
  *   - Tasa de preñez     = gestaciones EN_CURSO / hembras activas
  *   - Tasa de natalidad  = nacimientos (desde el 1/1 del año anterior) / hembras activas
- *   - Mortalidad crías   = animales MUERTO nacidos en los últimos 365 días / nacimientos
+ *   - Mortalidad crías   = crías muertas en los últimos 365 días / nacimientos
  *   - Días abiertos      = promedio de días desde el parto de las gestaciones FINALIZADA_PARTO
  *   - Animales tratados  = animales con tratamiento iniciado este año / animales activos
  *   - Recurrencia        = animales con la misma enfermedad ≥ 2 veces / animales con diagnóstico
@@ -21,20 +22,35 @@
 import { PrismaClient, EstadoAnimal, Sexo, TipoPropositoAnimal, EstadoCria, NivelGravedad } from '@prisma/client';
 
 const prisma = new PrismaClient();
-const MARCA = '[datos de prueba de indicadores]';
+const PREFIJO_ID = 'ind-';
+// Marca visible que usaban las versiones anteriores del script; solo se usa
+// para limpiar los registros que todavía la tengan.
+const MARCA_ANTERIOR = '[datos de prueba de indicadores]';
 const DIA_MS = 24 * 60 * 60 * 1000;
 const DURACION_GESTACION_DIAS = 283;
 
 const haceDias = (dias: number) => new Date(Date.now() - dias * DIA_MS);
 
+const deEsteScript = (campo: 'observaciones') => ({
+  OR: [{ id: { startsWith: PREFIJO_ID } }, { [campo]: MARCA_ANTERIOR }],
+});
+
 async function limpiar() {
+  // Alertas que apunten a gestaciones o eventos que se van a borrar.
+  const [gestacionesIds, eventosIds] = await Promise.all([
+    prisma.gestacion.findMany({ where: deEsteScript('observaciones'), select: { id: true } }),
+    prisma.eventoReproductivo.findMany({ where: deEsteScript('observaciones'), select: { id: true } }),
+  ]);
+  await prisma.notificacion.deleteMany({
+    where: { entidadId: { in: [...gestacionesIds, ...eventosIds].map((r) => r.id) } },
+  });
   // Orden inverso a las dependencias: nacimiento → gestación (Restrict),
   // y el historial médico arrastra sus enfermedades y tratamientos (Cascade).
-  const nacimientos = await prisma.nacimiento.deleteMany({ where: { observaciones: MARCA } });
-  const gestaciones = await prisma.gestacion.deleteMany({ where: { observaciones: MARCA } });
-  const eventos = await prisma.eventoReproductivo.deleteMany({ where: { observaciones: MARCA } });
-  const consultas = await prisma.historialMedico.deleteMany({ where: { observaciones: MARCA } });
-  const animales = await prisma.animal.deleteMany({ where: { observaciones: MARCA } });
+  const nacimientos = await prisma.nacimiento.deleteMany({ where: deEsteScript('observaciones') });
+  const gestaciones = await prisma.gestacion.deleteMany({ where: deEsteScript('observaciones') });
+  const eventos = await prisma.eventoReproductivo.deleteMany({ where: deEsteScript('observaciones') });
+  const consultas = await prisma.historialMedico.deleteMany({ where: deEsteScript('observaciones') });
+  const animales = await prisma.animal.deleteMany({ where: deEsteScript('observaciones') });
   console.log(
     `Eliminados: ${animales.count} crías, ${nacimientos.count} nacimientos, ${gestaciones.count} gestaciones, `
     + `${eventos.count} eventos reproductivos, ${consultas.count} consultas médicas`,
@@ -75,20 +91,22 @@ async function crear() {
     const inicio = haceDias(diasDeGestacion[i]!);
     const evento = await prisma.eventoReproductivo.create({
       data: {
+        id: `${PREFIJO_ID}diag-${i + 1}`,
         tipo: 'DIAGNOSTICO_GESTACION',
         fecha: new Date(inicio.getTime() + 45 * DIA_MS),
         descripcion: 'Diagnóstico de gestación positivo por ecografía',
-        observaciones: MARCA,
+        observaciones: 'Vesícula embrionaria y latido fetal visibles',
         animalId: madre.id,
         registradoPorId: veterinario.id,
       },
     });
     const gestacion = await prisma.gestacion.create({
       data: {
+        id: `${PREFIJO_ID}gest-${i + 1}`,
         fechaInicio: inicio,
         fechaPartoEsperado: new Date(inicio.getTime() + DURACION_GESTACION_DIAS * DIA_MS),
         estadoGestacion: 'EN_CURSO',
-        observaciones: MARCA,
+        observaciones: 'Gestación confirmada por ecografía',
         madreId: madre.id,
         eventoReproductivoId: evento.id,
       },
@@ -126,26 +144,28 @@ async function crear() {
 
     const gestacion = await prisma.gestacion.create({
       data: {
+        id: `${PREFIJO_ID}parto-${i + 1}`,
         fechaInicio: new Date(fechaParto.getTime() - DURACION_GESTACION_DIAS * DIA_MS),
         fechaPartoEsperado: fechaParto,
         fechaPartoReal: fechaParto,
         estadoGestacion: 'FINALIZADA_PARTO',
-        observaciones: MARCA,
+        observaciones: 'Parto a término',
         madreId: madre.id,
       },
     });
     await prisma.eventoReproductivo.create({
       data: {
+        id: `${PREFIJO_ID}ev-parto-${i + 1}`,
         tipo: 'PARTO',
         fecha: fechaParto,
         descripcion: `Parto normal, cría ${numeroCria}`,
-        observaciones: MARCA,
         animalId: madre.id,
         registradoPorId: veterinario.id,
       },
     });
     const cria = await prisma.animal.create({
       data: {
+        id: `${PREFIJO_ID}cria-${i + 1}`,
         numeroIdentificacion: numeroCria,
         sexo: parto.sexo,
         fechaNacimiento: fechaParto,
@@ -154,7 +174,7 @@ async function crear() {
         estado: parto.viva ? EstadoAnimal.ACTIVO : EstadoAnimal.MUERTO,
         fechaIngreso: fechaParto,
         ...(!parto.viva && { fechaEgreso: new Date(fechaParto.getTime() + 4 * DIA_MS), motivoEgreso: 'Muerte neonatal (diarrea)' }),
-        observaciones: MARCA,
+        procedencia: 'Nacida en la finca',
         loteId: madre.loteId,
         razaId: madre.razaId,
         madreId: madre.id,
@@ -165,9 +185,12 @@ async function crear() {
         fechaNacimiento: fechaParto,
         tipoParto: 'NORMAL',
         pesoAlNacer: cria.pesoNacimiento,
+        id: `${PREFIJO_ID}nac-${i + 1}`,
         estadoCria: parto.viva ? EstadoCria.VIVO : EstadoCria.MUERTO_NEONATAL,
         sexoCria: parto.sexo,
-        observaciones: MARCA,
+        observaciones: parto.viva
+          ? 'Cría vigorosa, mamó calostro en la primera hora'
+          : 'Diarrea neonatal; murió a los 4 días pese al tratamiento',
         gestacionId: gestacion.id,
         criaId: cria.id,
       },
@@ -195,11 +218,12 @@ async function crear() {
     const medicamento = medicamentos[i % medicamentos.length]!;
     await prisma.historialMedico.create({
       data: {
+        id: `${PREFIJO_ID}consulta-${i + 1}`,
         fechaConsulta: fecha,
         motivoConsulta: `Revisión por signos compatibles con ${caso.enfermedad.toLowerCase()}`,
         diagnosticoDefinitivo: caso.enfermedad,
         temperatura: 39.4 + (i % 3) * 0.4,
-        observaciones: MARCA,
+        observaciones: 'Evolución favorable; se indica control al finalizar el tratamiento',
         animalId: pacientes[caso.animal]!.id,
         veterinarioId: veterinario.id,
         enfermedades: {
