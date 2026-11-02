@@ -13,6 +13,10 @@ import {
   controladorFinalizarTratamiento,
   controladorActualizarPrueba,
   controladorAgregarPrueba,
+  controladorAgregarEnfermedad,
+  controladorActualizarEnfermedad,
+  controladorAgregarTratamiento,
+  controladorAgregarObservacion,
 } from './historialMedico.controlador';
 
 const enrutador = Router();
@@ -59,6 +63,37 @@ enrutador.patch(
   requerirPrivilegio('historial_medico.crear'),
   registrarAuditoria('Actualizar resultado de prueba complementaria', 'PruebaComplementaria'),
   controladorActualizarPrueba,
+);
+
+// Completar la consulta cuando llegan los resultados de las pruebas: agregar
+// o corregir un diagnóstico, iniciar un tratamiento y añadir notas. Lo
+// observado el día de la consulta (anamnesis, exploración) no se edita.
+enrutador.post(
+  '/:id/enfermedades',
+  requerirPrivilegio('historial_medico.crear'),
+  registrarAuditoria('Agregar diagnóstico a consulta', 'EnfermedadDiagnosticada'),
+  controladorAgregarEnfermedad,
+);
+
+enrutador.patch(
+  '/enfermedades/:id',
+  requerirPrivilegio('historial_medico.crear'),
+  registrarAuditoria('Actualizar diagnóstico', 'EnfermedadDiagnosticada'),
+  controladorActualizarEnfermedad,
+);
+
+enrutador.post(
+  '/:id/tratamientos',
+  requerirPrivilegio('historial_medico.crear'),
+  registrarAuditoria('Agregar tratamiento a consulta', 'Tratamiento'),
+  controladorAgregarTratamiento,
+);
+
+enrutador.post(
+  '/:id/observaciones',
+  requerirPrivilegio('historial_medico.crear'),
+  registrarAuditoria('Agregar observación a consulta', 'HistorialMedico'),
+  controladorAgregarObservacion,
 );
 
 enrutador.delete(

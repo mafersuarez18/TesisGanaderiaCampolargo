@@ -114,6 +114,7 @@ const seleccionHistorial = {
       viaAdministracion: true,
       frecuencia: true,
       duracionDias: true,
+      fechaInicio: true,
       estado: true,
       enfermedadDiagnosticadaId: true,
       medicamento: { select: { nombre: true } },
@@ -552,6 +553,137 @@ export async function actualizarPruebaComplementaria(id: string, datos: DatosAct
       observaciones: vacioANull(datos.observaciones),
     },
   });
+}
+
+// ─── Completar una consulta ya registrada ─────────────────────────────────────
+// Muchas veces el diagnóstico definitivo depende de pruebas complementarias
+// que llegan días después de la consulta. Lo observado ese día (anamnesis,
+// exploración física, signos) no se edita; solo se puede agregar o corregir
+// el diagnóstico, iniciar el tratamiento que corresponda y añadir notas.
+// Cada cambio queda en la auditoría (ver historialMedico.rutas.ts).
+
+type DatosDiagnostico = NonNullable<DatosCrearHistorial['enfermedades']>[number];
+
+async function obtenerAnimalDeConsulta(historialMedicoId: string): Promise<string> {
+  const historial = await prisma.historialMedico.findUnique({
+    where: { id: historialMedicoId },
+    select: { animalId: true },
+  });
+  if (!historial) throw new ErrorNoEncontrado(`Historial médico con id '${historialMedicoId}' no encontrado`);
+  return historial.animalId;
+}
+
+/** Agrega un diagnóstico (enfermedad) a una consulta ya registrada. */
+export async function agregarEnfermedadDiagnosticada(historialMedicoId: string, datos: DatosDiagnostico) {
+  const animalId = await obtenerAnimalDeConsulta(historialMedicoId);
+
+  const enfermedad = await prisma.enfermedadDiagnosticada.create({
+    data: { ...datos, historialMedicoId, fechaActualizacion: new Date() },
+  });
+
+  await recalcularEstadoSanitarioAnimal(animalId);
+  return enfermedad;
+}
+
+/**
+ * Corrige un diagnóstico ya registrado (p. ej. pasar de presuntivo a
+ * definitivo al llegar los resultados). Solo se tocan los campos enviados;
+ * un string vacío deja el campo en null.
+ */
+export async function actualizarEnfermedadDiagnosticada(id: string, datos: Partial<DatosDiagnostico>) {
+  const existente = await prisma.enfermedadDiagnosticada.findUnique({ where: { id }, select: { id: true } });
+  if (!existente) throw new ErrorNoEncontrado(`Diagnóstico con id '${id}' no encontrado`);
+
+  const vacioANull = (v: string | undefined) => (v === undefined ? undefined : v.trim() || null);
+
+  return prisma.enfermedadDiagnosticada.update({
+    where: { id },
+    data: {
+      nombreEnfermedad:      datos.nombreEnfermedad?.trim(),
+      nivelGravedad:         datos.nivelGravedad,
+      fechaInicio:           datos.fechaInicio,
+      descripcionClinica:    vacioANull(datos.descripcionClinica),
+      observaciones:         vacioANull(datos.observaciones),
+      diagnosticoDefinitivo: vacioANull(datos.diagnosticoDefinitivo),
+      pronostico:            vacioANull(datos.pronostico),
+      planDiagnostico:       vacioANull(datos.planDiagnostico),
+      tiempoEvolucion:       vacioANull(datos.tiempoEvolucion),
+      sintomas:              vacioANull(datos.sintomas),
+      pruebasDiagnostico:    vacioANull(datos.pruebasDiagnostico),
+      fechaActualizacion:    new Date(),
+    },
+  });
+}
+
+/**
+ * Inicia un tratamiento desde una consulta ya registrada. Si no se indica
+ * qué diagnóstico atiende y la consulta tiene uno solo, se vincula a ese
+ * (misma regla que al crear la consulta). El aviso "¿mejoró?" del motor de
+ * alertas se calcula desde fechaInicio + duracionDias, así que funciona igual.
+ */
+export async function agregarTratamiento(
+  historialMedicoId: string,
+  datos: NonNullable<DatosCrearHistorial['tratamientos']>[number],
+) {
+  const animalId = await obtenerAnimalDeConsulta(historialMedicoId);
+
+  let enfermedadDiagnosticadaId = datos.enfermedadDiagnosticadaId;
+  if (enfermedadDiagnosticadaId) {
+    const enfermedad = await prisma.enfermedadDiagnosticada.findFirst({
+      where: { id: enfermedadDiagnosticadaId, historialMedico: { animalId } },
+      select: { id: true },
+    });
+    if (!enfermedad) throw new ErrorConflicto('El diagnóstico indicado no pertenece a este animal');
+  } else {
+    const diagnosticos = await prisma.enfermedadDiagnosticada.findMany({
+      where: { historialMedicoId },
+      select: { id: true },
+    });
+    if (diagnosticos.length === 1) enfermedadDiagnosticadaId = diagnosticos[0]!.id;
+  }
+
+  const tratamiento = await prisma.tratamiento.create({
+    data: {
+      dosis:             datos.dosis,
+      viaAdministracion: datos.viaAdministracion,
+      frecuencia:        datos.frecuencia,
+      duracionDias:      datos.duracionDias,
+      fechaInicio:       datos.fechaInicio,
+      observaciones:     datos.observaciones,
+      descripcion:       datos.descripcion,
+      historialMedicoId,
+      medicamentoId:     datos.medicamentoId,
+      enfermedadDiagnosticadaId,
+    },
+  });
+
+  await recalcularEstadoSanitarioAnimal(animalId);
+  return tratamiento;
+}
+
+/**
+ * Añade una nota a las observaciones de la consulta sin borrar lo anterior:
+ * cada nota queda con su fecha y el nombre de quien la escribió.
+ */
+export async function agregarObservacionConsulta(
+  historialMedicoId: string,
+  texto: string,
+  autor: { nombre: string; apellido: string },
+) {
+  const historial = await prisma.historialMedico.findUnique({
+    where: { id: historialMedicoId },
+    select: { observaciones: true },
+  });
+  if (!historial) throw new ErrorNoEncontrado(`Historial médico con id '${historialMedicoId}' no encontrado`);
+
+  const fecha = new Date().toLocaleDateString('es-VE', { timeZone: 'America/Caracas' });
+  const nota = `[${fecha} · ${autor.nombre} ${autor.apellido}] ${texto.trim()}`;
+  const observaciones = historial.observaciones?.trim()
+    ? `${historial.observaciones.trim()}\n\n${nota}`
+    : nota;
+
+  await prisma.historialMedico.update({ where: { id: historialMedicoId }, data: { observaciones } });
+  return { observaciones };
 }
 
 export async function eliminarHistorialMedico(id: string) {

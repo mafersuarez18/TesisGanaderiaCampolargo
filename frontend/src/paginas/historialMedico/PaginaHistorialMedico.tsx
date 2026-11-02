@@ -43,26 +43,14 @@ interface HistorialMedico {
     lote?: { finca?: { nombre: string } };
   };
   veterinario: { id: string; nombre: string; apellido: string };
-  enfermedades: Array<{
-    id: string;
-    nombreEnfermedad: string;
-    nivelGravedad?: string;
-    fechaInicio: string;
-    activa: boolean;
-    descripcionClinica?: string;
-    diagnosticoDefinitivo?: string;
-    pronostico?: string;
-    planDiagnostico?: string;
-    tiempoEvolucion?: string;
-    sintomas?: string;
-    pruebasDiagnostico?: string;
-  }>;
+  enfermedades: EnfermedadDiagnosticada[];
   tratamientos: Array<{
     id: string;
     dosis: string;
     viaAdministracion: string;
     frecuencia: string;
     duracionDias?: number;
+    fechaInicio?: string;
     estado: string;
     enfermedadDiagnosticadaId?: string;
     medicamento: { nombre: string };
@@ -77,6 +65,24 @@ interface HistorialMedico {
     descripcion?: string;
   };
   pruebasComplementarias: PruebaComplementaria[];
+}
+
+interface EnfermedadDiagnosticada {
+  id: string;
+  nombreEnfermedad: string;
+  nivelGravedad?: string | null;
+  fechaInicio: string;
+  activa: boolean;
+  descripcionClinica?: string | null;
+  observaciones?: string | null;
+  diagnosticoDefinitivo?: string | null;
+  pronostico?: string | null;
+  planDiagnostico?: string | null;
+  tiempoEvolucion?: string | null;
+  sintomas?: string | null;
+  pruebasDiagnostico?: string | null;
+  // Se llena cuando el diagnóstico se agrega o corrige después de la consulta
+  fechaActualizacion?: string | null;
 }
 
 interface PruebaComplementaria {
@@ -198,6 +204,27 @@ export default function PaginaHistorialMedico() {
   const [historialSeleccionado, setHistorialSeleccionado]   = useState<HistorialMedico | null>(null);
   const [mostrarEliminar, setMostrarEliminar]               = useState<string | null>(null);
   const [mostrarFormulario, setMostrarFormulario]           = useState(false);
+  // Diagnóstico abierto en modo edición ('nuevo' = agregando uno nuevo)
+  const [diagnosticoEnEdicion, setDiagnosticoEnEdicion]     = useState<string | null>(null);
+  const [avisoOffline, setAvisoOffline]                     = useState(false);
+
+  useEffect(() => {
+    setDiagnosticoEnEdicion(null);
+    setAvisoOffline(false);
+  }, [historialSeleccionado?.id]);
+
+  // Tras completar la consulta (diagnóstico, tratamiento, nota) se vuelve a
+  // pedir al servidor para mostrar lo guardado tal cual quedó. Sin conexión
+  // el cambio queda en la cola offline y se verá al sincronizar.
+  const refrescarSeleccionado = async (offline: boolean) => {
+    queryClient.invalidateQueries({ queryKey: ['historialMedico'] });
+    if (offline) { setAvisoOffline(true); return; }
+    if (!historialSeleccionado) return;
+    try {
+      const r = await clienteHttp.get(`/historial-medico/${historialSeleccionado.id}`);
+      setHistorialSeleccionado(r.data.datos as HistorialMedico);
+    } catch { /* se verá al recargar la lista */ }
+  };
 
   const animalIdFiltro = searchParams.get('animalId') ?? undefined;
   const desdeFiltro    = searchParams.get('desde')    ?? undefined;
@@ -558,6 +585,13 @@ export default function PaginaHistorialMedico() {
 
               <div className="p-6 space-y-5">
 
+                {avisoOffline && (
+                  <p className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-50 text-xs text-amber-800">
+                    <Icono nombre="cloud_upload" clase="text-[15px]" />
+                    Guardado sin conexión: el cambio aparecerá aquí cuando se sincronice.
+                  </p>
+                )}
+
                 {/* ── Acciones rápidas ── */}
                 <div className="flex gap-2">
                   <button
@@ -800,13 +834,26 @@ export default function PaginaHistorialMedico() {
                 )}
 
                 {/* ── Enfermedades ── */}
-                {historialSeleccionado.enfermedades.length > 0 && (
+                {(historialSeleccionado.enfermedades.length > 0 || tienePrivilegio('historial_medico.crear')) && (
                   <section>
                     <p className="text-[10px] uppercase font-semibold text-on-surface-variant tracking-wider mb-3 flex items-center gap-1.5">
                       <Icono nombre="bug_report" clase="text-[14px]" /> Enfermedades
                     </p>
                     <div className="space-y-2">
-                      {historialSeleccionado.enfermedades.map((e) => (
+                      {historialSeleccionado.enfermedades.length === 0 && (
+                        <p className="text-xs text-on-surface-variant italic">
+                          Sin diagnóstico registrado. Si depende de las pruebas complementarias, agréguelo cuando lleguen los resultados.
+                        </p>
+                      )}
+                      {historialSeleccionado.enfermedades.map((e) => diagnosticoEnEdicion === e.id ? (
+                        <FormularioDiagnostico
+                          key={e.id}
+                          historialId={historialSeleccionado.id}
+                          enfermedad={e}
+                          onCancelar={() => setDiagnosticoEnEdicion(null)}
+                          onGuardado={(offline) => { setDiagnosticoEnEdicion(null); refrescarSeleccionado(offline); }}
+                        />
+                      ) : (
                         <div key={e.id} className="p-3 rounded-xl bg-surface-container border border-outline-variant/20">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-sm font-medium text-on-surface">{e.nombreEnfermedad}</span>
@@ -830,8 +877,8 @@ export default function PaginaHistorialMedico() {
                           {e.descripcionClinica && (
                             <p className="text-xs text-on-surface-variant mt-1">{e.descripcionClinica}</p>
                           )}
-                          {(e as any).observaciones && (
-                            <p className="text-xs text-on-surface-variant mt-1">{(e as any).observaciones}</p>
+                          {e.observaciones && (
+                            <p className="text-xs text-on-surface-variant mt-1">{e.observaciones}</p>
                           )}
                           {e.sintomas && (
                             <p className="text-xs text-on-surface-variant mt-1"><span className="font-medium text-on-surface">Signos clínicos:</span> {e.sintomas}</p>
@@ -851,14 +898,41 @@ export default function PaginaHistorialMedico() {
                           {e.pruebasDiagnostico && (
                             <p className="text-xs text-on-surface-variant mt-1"><span className="font-medium text-on-surface">Pruebas:</span> {e.pruebasDiagnostico}</p>
                           )}
+                          {e.fechaActualizacion && (
+                            <p className="mt-2 flex items-center gap-1 text-[11px] text-tertiary">
+                              <Icono nombre="update" clase="text-[13px]" />
+                              Diagnóstico actualizado el {new Date(e.fechaActualizacion).toLocaleDateString('es-VE')}
+                            </p>
+                          )}
+                          {tienePrivilegio('historial_medico.crear') && (
+                            <button type="button" onClick={() => setDiagnosticoEnEdicion(e.id)}
+                              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                              <Icono nombre="edit" clase="text-[14px]" />
+                              Actualizar diagnóstico
+                            </button>
+                          )}
                         </div>
                       ))}
+                      {tienePrivilegio('historial_medico.crear') && (
+                        diagnosticoEnEdicion === 'nuevo' ? (
+                          <FormularioDiagnostico
+                            historialId={historialSeleccionado.id}
+                            onCancelar={() => setDiagnosticoEnEdicion(null)}
+                            onGuardado={(offline) => { setDiagnosticoEnEdicion(null); refrescarSeleccionado(offline); }}
+                          />
+                        ) : (
+                          <button type="button" onClick={() => setDiagnosticoEnEdicion('nuevo')}
+                            className="w-full flex items-center justify-center gap-2 py-2 border border-dashed border-primary/40 rounded-xl text-sm text-primary hover:bg-primary/5 transition-colors">
+                            <Icono nombre="add" clase="text-[16px]" /> Agregar diagnóstico
+                          </button>
+                        )
+                      )}
                     </div>
                   </section>
                 )}
 
                 {/* ── Tratamientos ── */}
-                {historialSeleccionado.tratamientos.length > 0 && (
+                {(historialSeleccionado.tratamientos.length > 0 || tienePrivilegio('historial_medico.crear')) && (
                   <section>
                     <p className="text-[10px] uppercase font-semibold text-on-surface-variant tracking-wider mb-3 flex items-center gap-1.5">
                       <Icono nombre="medication" clase="text-[14px]" /> Tratamientos
@@ -880,6 +954,7 @@ export default function PaginaHistorialMedico() {
                             <span>Vía: <strong className="text-on-surface">{t.viaAdministracion}</strong></span>
                             <span>Frecuencia: <strong className="text-on-surface">{t.frecuencia}</strong></span>
                             {t.duracionDias && <span>Duración: <strong className="text-on-surface">{t.duracionDias}d</strong></span>}
+                            {t.fechaInicio && <span>Inicio: <strong className="text-on-surface">{new Date(t.fechaInicio).toLocaleDateString('es-VE')}</strong></span>}
                           </div>
                           {t.enfermedadDiagnosticada && (
                             <p className="text-xs text-on-surface-variant mt-2 flex items-center gap-1">
@@ -889,6 +964,17 @@ export default function PaginaHistorialMedico() {
                           )}
                         </div>
                       ))}
+                      {historialSeleccionado.tratamientos.length === 0 && (
+                        <p className="text-xs text-on-surface-variant italic">Esta consulta no tiene tratamientos.</p>
+                      )}
+                      {tienePrivilegio('historial_medico.crear') && (
+                        <FormularioTratamientoPosterior
+                          key={historialSeleccionado.id}
+                          historialId={historialSeleccionado.id}
+                          enfermedades={historialSeleccionado.enfermedades}
+                          onGuardado={refrescarSeleccionado}
+                        />
+                      )}
                     </div>
                   </section>
                 )}
@@ -898,12 +984,21 @@ export default function PaginaHistorialMedico() {
                     así que se consultan desde el historial completo del animal
                     (PDF "Historial Médico por Animal") en vez de por consulta. */}
 
-                {historialSeleccionado.observaciones && (
+                {(historialSeleccionado.observaciones || tienePrivilegio('historial_medico.crear')) && (
                   <section>
                     <p className="text-[10px] uppercase font-semibold text-on-surface-variant tracking-wider mb-1">Observaciones generales</p>
-                    <p className="text-sm text-on-surface-variant bg-surface-container p-3 rounded-xl">
-                      {historialSeleccionado.observaciones}
-                    </p>
+                    {historialSeleccionado.observaciones && (
+                      <p className="text-sm text-on-surface-variant bg-surface-container p-3 rounded-xl whitespace-pre-line mb-2">
+                        {historialSeleccionado.observaciones}
+                      </p>
+                    )}
+                    {tienePrivilegio('historial_medico.crear') && (
+                      <FormularioObservacion
+                        key={historialSeleccionado.id}
+                        historialId={historialSeleccionado.id}
+                        onGuardado={refrescarSeleccionado}
+                      />
+                    )}
                   </section>
                 )}
 
@@ -1165,6 +1260,297 @@ function FormularioNuevaPrueba({
         <button type="button" onClick={() => mutacion.mutate()} disabled={mutacion.isPending}
           className="flex-1 boton boton-primario text-sm py-1.5">
           {mutacion.isPending ? 'Guardando...' : 'Agregar prueba'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Completar una consulta ya registrada ──────────────────────────────────────
+// El diagnóstico definitivo muchas veces depende de pruebas que llegan días
+// después: desde el panel de detalle se puede agregar o corregir un
+// diagnóstico, iniciar el tratamiento que corresponda y añadir notas. Lo
+// observado el día de la consulta no se edita.
+
+// Agrega un diagnóstico nuevo o actualiza uno existente (si llega `enfermedad`).
+function FormularioDiagnostico({
+  historialId, enfermedad, onCancelar, onGuardado,
+}: {
+  historialId: string;
+  enfermedad?: EnfermedadDiagnosticada;
+  onCancelar: () => void;
+  onGuardado: (offline: boolean) => void;
+}) {
+  const [datos, setDatos] = useState<EnfermedadForm>({
+    nombreEnfermedad:      enfermedad?.nombreEnfermedad ?? '',
+    nivelGravedad:         enfermedad?.nivelGravedad ?? '',
+    fechaInicio:           enfermedad ? fechaLocalISO(new Date(enfermedad.fechaInicio)) : fechaLocalISO(),
+    descripcionClinica:    enfermedad?.descripcionClinica ?? '',
+    diagnosticoDefinitivo: enfermedad?.diagnosticoDefinitivo ?? '',
+    pronostico:            enfermedad?.pronostico ?? '',
+    planDiagnostico:       enfermedad?.planDiagnostico ?? '',
+    tiempoEvolucion:       enfermedad?.tiempoEvolucion ?? '',
+    sintomas:              enfermedad?.sintomas ?? '',
+    pruebasDiagnostico:    enfermedad?.pruebasDiagnostico ?? '',
+  });
+  const [error, setError] = useState('');
+  const set = (campo: keyof EnfermedadForm, valor: string) => setDatos((d) => ({ ...d, [campo]: valor }));
+
+  const mutacion = useMutation({
+    mutationFn: () => {
+      // Al crear, los campos vacíos se omiten; al actualizar se envían
+      // vacíos para que el backend los deje en null (borrar un campo).
+      const textos = {
+        descripcionClinica: datos.descripcionClinica,
+        diagnosticoDefinitivo: datos.diagnosticoDefinitivo,
+        pronostico: datos.pronostico,
+        planDiagnostico: datos.planDiagnostico,
+        tiempoEvolucion: datos.tiempoEvolucion,
+        sintomas: datos.sintomas,
+        pruebasDiagnostico: datos.pruebasDiagnostico,
+      };
+      const payload = {
+        nombreEnfermedad: datos.nombreEnfermedad.trim(),
+        nivelGravedad: datos.nivelGravedad || undefined,
+        fechaInicio: isoMediodia(datos.fechaInicio),
+        ...(enfermedad
+          ? textos
+          : Object.fromEntries(Object.entries(textos).map(([k, v]) => [k, v.trim() || undefined]))),
+      };
+      return enfermedad
+        ? clienteHttp.patch(`/historial-medico/enfermedades/${enfermedad.id}`, payload, { descripcionOffline: 'Actualización de diagnóstico' })
+        : clienteHttp.post(`/historial-medico/${historialId}/enfermedades`, payload, { descripcionOffline: 'Diagnóstico' });
+    },
+    onSuccess: (r) => onGuardado(!!r.data?.offline),
+    onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'No se pudo guardar el diagnóstico. Intente de nuevo.'),
+  });
+
+  const guardar = () => {
+    if (datos.nombreEnfermedad.trim().length < 2) { setError('Indique el nombre de la enfermedad'); return; }
+    setError('');
+    mutacion.mutate();
+  };
+
+  const campoTexto = (campo: keyof EnfermedadForm, etiqueta: string, placeholder: string) => (
+    <CampoLabel etiqueta={etiqueta}>
+      <input type="text" value={datos[campo]} onChange={(e) => set(campo, e.target.value)}
+        placeholder={placeholder} className="campo-entrada text-sm" />
+    </CampoLabel>
+  );
+
+  return (
+    <div className="p-3 rounded-xl bg-surface-container border border-primary/30 space-y-2">
+      <p className="text-sm font-medium text-on-surface">
+        {enfermedad ? 'Actualizar diagnóstico' : 'Nuevo diagnóstico'}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {campoTexto('nombreEnfermedad', 'Nombre de la enfermedad *', 'Ej: Mastitis, anaplasmosis...')}
+        <CampoLabel etiqueta="Nivel de gravedad">
+          <select value={datos.nivelGravedad} onChange={(e) => set('nivelGravedad', e.target.value)} className="campo-entrada text-sm">
+            <option value="">No especificado</option>
+            {Object.entries(ETIQUETAS_GRAVEDAD).map(([val, et]) => <option key={val} value={val}>{et}</option>)}
+          </select>
+        </CampoLabel>
+        <CampoLabel etiqueta="Fecha de inicio">
+          <CampoFecha value={datos.fechaInicio} onChange={(valor) => set('fechaInicio', valor)} className="text-sm" />
+        </CampoLabel>
+        {campoTexto('diagnosticoDefinitivo', 'Diagnóstico', 'Confirmado con los resultados de...')}
+        {campoTexto('pruebasDiagnostico', 'Pruebas diagnóstico', 'Resultados que lo confirman...')}
+        {campoTexto('pronostico', 'Pronóstico', 'Favorable, reservado, grave...')}
+        {campoTexto('descripcionClinica', 'Descripción clínica', 'Hallazgos relevantes...')}
+        {campoTexto('sintomas', 'Signos clínicos', 'Signos asociados a esta condición...')}
+        {campoTexto('tiempoEvolucion', 'Tiempo de evolución', 'Ej: 3 días, 2 semanas')}
+        {campoTexto('planDiagnostico', 'Plan diagnóstico', 'Pruebas a solicitar...')}
+      </div>
+      {error && <p className="text-xs text-error">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancelar} disabled={mutacion.isPending}
+          className="flex-1 boton boton-secundario text-sm py-1.5">Cancelar</button>
+        <button type="button" onClick={guardar} disabled={mutacion.isPending}
+          className="flex-1 boton boton-primario text-sm py-1.5">
+          {mutacion.isPending ? 'Guardando...' : enfermedad ? 'Guardar cambios' : 'Agregar diagnóstico'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Inicia un tratamiento desde una consulta ya registrada (p. ej. al confirmar
+// el diagnóstico con los resultados de laboratorio).
+function FormularioTratamientoPosterior({
+  historialId, enfermedades, onGuardado,
+}: {
+  historialId: string;
+  enfermedades: EnfermedadDiagnosticada[];
+  onGuardado: (offline: boolean) => void;
+}) {
+  const queryClient = useQueryClient();
+  const vacio = (): TratamientoForm => ({
+    medicamentoId: '', medicamentoNombreNuevo: '',
+    // Con un solo diagnóstico en la consulta, se propone vincularlo a ese
+    enfermedadDiagnosticadaId: enfermedades.length === 1 ? enfermedades[0]!.id : '',
+    fechaInicio: fechaLocalISO(), dosis: '', viaAdministracion: '', frecuencia: '', duracionDias: '', observaciones: '',
+  });
+  const [abierto, setAbierto] = useState(false);
+  const [datos, setDatos] = useState<TratamientoForm>(vacio);
+  const [error, setError] = useState('');
+  const set = (campo: keyof TratamientoForm, valor: string) => setDatos((d) => ({ ...d, [campo]: valor }));
+
+  const { data: medicamentos = [] } = useQuery<MedicamentoOpcion[]>({
+    queryKey: ['medicamentos-catalogo'],
+    queryFn: () => clienteHttp.get('/vacunacion/medicamentos').then((r) => r.data.datos),
+    enabled: abierto,
+  });
+
+  const mutacion = useMutation({
+    mutationFn: async () => {
+      let medicamentoId = datos.medicamentoId;
+      // Igual que en el formulario de consulta: si el medicamento no está en
+      // el catálogo, se crea primero (sinCola: hace falta su id de inmediato).
+      if (!medicamentoId && datos.medicamentoNombreNuevo) {
+        const { data: dataMed } = await clienteHttp.post('/vacunacion/medicamentos', {
+          nombre: datos.medicamentoNombreNuevo.trim(),
+        }, { sinCola: true });
+        medicamentoId = dataMed.datos.id;
+        queryClient.invalidateQueries({ queryKey: ['medicamentos-catalogo'] });
+      }
+      return clienteHttp.post(`/historial-medico/${historialId}/tratamientos`, {
+        medicamentoId,
+        enfermedadDiagnosticadaId: datos.enfermedadDiagnosticadaId || undefined,
+        fechaInicio: isoMediodia(datos.fechaInicio),
+        dosis: datos.dosis.trim(),
+        viaAdministracion: datos.viaAdministracion.trim(),
+        frecuencia: datos.frecuencia.trim(),
+        duracionDias: datos.duracionDias ? parseInt(datos.duracionDias) : undefined,
+        observaciones: datos.observaciones.trim() || undefined,
+      }, { descripcionOffline: 'Tratamiento' });
+    },
+    onSuccess: (r) => {
+      setAbierto(false);
+      setDatos(vacio());
+      onGuardado(!!r.data?.offline);
+    },
+    onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'No se pudo agregar el tratamiento. Intente de nuevo.'),
+  });
+
+  const guardar = () => {
+    if (!datos.medicamentoId && !datos.medicamentoNombreNuevo.trim()) { setError('Seleccione o escriba un medicamento'); return; }
+    if (!datos.dosis.trim() || !datos.viaAdministracion.trim() || !datos.frecuencia.trim()) {
+      setError('Dosis, vía de administración y frecuencia son requeridas');
+      return;
+    }
+    setError('');
+    mutacion.mutate();
+  };
+
+  if (!abierto) {
+    return (
+      <button type="button" onClick={() => { setDatos(vacio()); setError(''); setAbierto(true); }}
+        className="w-full flex items-center justify-center gap-2 py-2 border border-dashed border-primary/40 rounded-xl text-sm text-primary hover:bg-primary/5 transition-colors">
+        <Icono nombre="add" clase="text-[16px]" /> Agregar tratamiento
+      </button>
+    );
+  }
+
+  return (
+    <div className="p-3 rounded-xl bg-surface-container border border-primary/30 space-y-2">
+      <p className="text-sm font-medium text-on-surface">Nuevo tratamiento</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <CampoLabel etiqueta="Medicamento *">
+          <SelectorMedicamento
+            medicamentos={medicamentos}
+            medicamentoId={datos.medicamentoId}
+            medicamentoNombreNuevo={datos.medicamentoNombreNuevo}
+            onSeleccionar={(id) => setDatos((d) => ({ ...d, medicamentoId: id, medicamentoNombreNuevo: '' }))}
+            onEscribir={(texto) => setDatos((d) => ({ ...d, medicamentoId: '', medicamentoNombreNuevo: texto }))}
+          />
+        </CampoLabel>
+        <CampoLabel etiqueta="Enfermedad que atiende">
+          <select value={datos.enfermedadDiagnosticadaId} onChange={(e) => set('enfermedadDiagnosticadaId', e.target.value)}
+            className="campo-entrada text-sm">
+            <option value="">Sin vincular</option>
+            {enfermedades.map((e) => <option key={e.id} value={e.id}>{e.nombreEnfermedad}</option>)}
+          </select>
+        </CampoLabel>
+        <CampoLabel etiqueta="Fecha de inicio">
+          <CampoFecha value={datos.fechaInicio} onChange={(valor) => set('fechaInicio', valor)} className="text-sm" />
+        </CampoLabel>
+        <CampoLabel etiqueta="Dosis *">
+          <input type="text" value={datos.dosis} onChange={(e) => set('dosis', e.target.value)}
+            placeholder="Ej: 10 ml" className="campo-entrada text-sm" />
+        </CampoLabel>
+        <CampoLabel etiqueta="Vía de administración *">
+          <input type="text" value={datos.viaAdministracion} onChange={(e) => set('viaAdministracion', e.target.value)}
+            placeholder="Intramuscular, oral..." className="campo-entrada text-sm" />
+        </CampoLabel>
+        <CampoLabel etiqueta="Frecuencia *">
+          <input type="text" value={datos.frecuencia} onChange={(e) => set('frecuencia', e.target.value)}
+            placeholder="Cada 12 horas, diario..." className="campo-entrada text-sm" />
+        </CampoLabel>
+        <CampoLabel etiqueta="Duración (días)">
+          <input type="number" min="1" value={datos.duracionDias} onChange={(e) => set('duracionDias', e.target.value)}
+            placeholder="Ej: 5" className="campo-entrada text-sm" />
+        </CampoLabel>
+        <CampoLabel etiqueta="Observaciones">
+          <input type="text" value={datos.observaciones} onChange={(e) => set('observaciones', e.target.value)}
+            placeholder="Notas adicionales..." className="campo-entrada text-sm" />
+        </CampoLabel>
+      </div>
+      {error && <p className="text-xs text-error">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setAbierto(false)} disabled={mutacion.isPending}
+          className="flex-1 boton boton-secundario text-sm py-1.5">Cancelar</button>
+        <button type="button" onClick={guardar} disabled={mutacion.isPending}
+          className="flex-1 boton boton-primario text-sm py-1.5">
+          {mutacion.isPending ? 'Guardando...' : 'Agregar tratamiento'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Añade una nota a las observaciones de la consulta: el backend la agrega al
+// final con la fecha y el nombre de quien la escribe, sin borrar lo anterior.
+function FormularioObservacion({
+  historialId, onGuardado,
+}: {
+  historialId: string;
+  onGuardado: (offline: boolean) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [texto, setTexto] = useState('');
+
+  const mutacion = useMutation({
+    mutationFn: () =>
+      clienteHttp.post(`/historial-medico/${historialId}/observaciones`, { texto: texto.trim() }, { descripcionOffline: 'Observación de consulta' }),
+    onSuccess: (r) => {
+      setTexto('');
+      setAbierto(false);
+      onGuardado(!!r.data?.offline);
+    },
+  });
+
+  if (!abierto) {
+    return (
+      <button type="button" onClick={() => { mutacion.reset(); setAbierto(true); }}
+        className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+        <Icono nombre="add_comment" clase="text-[14px]" /> Agregar observación
+      </button>
+    );
+  }
+
+  return (
+    <div className="p-3 rounded-xl bg-surface-container border border-primary/30 space-y-2">
+      <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} autoFocus maxLength={1000}
+        placeholder="Ej: Resultados de laboratorio recibidos, se confirma..." className="campo-entrada text-sm resize-none" />
+      <p className="text-[11px] text-on-surface-variant">Se guardará con la fecha de hoy y su nombre; las observaciones anteriores no se modifican.</p>
+      {mutacion.isError && <p className="text-xs text-error">No se pudo guardar la observación. Intente de nuevo.</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={() => setAbierto(false)} disabled={mutacion.isPending}
+          className="flex-1 boton boton-secundario text-sm py-1.5">Cancelar</button>
+        <button type="button" onClick={() => mutacion.mutate()} disabled={mutacion.isPending || texto.trim().length < 2}
+          className="flex-1 boton boton-primario text-sm py-1.5">
+          {mutacion.isPending ? 'Guardando...' : 'Agregar observación'}
         </button>
       </div>
     </div>

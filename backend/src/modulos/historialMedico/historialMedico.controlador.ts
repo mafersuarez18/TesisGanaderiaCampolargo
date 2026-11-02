@@ -10,6 +10,10 @@ import {
   finalizarTratamiento,
   actualizarPruebaComplementaria,
   agregarPruebaComplementaria,
+  agregarEnfermedadDiagnosticada,
+  actualizarEnfermedadDiagnosticada,
+  agregarTratamiento,
+  agregarObservacionConsulta,
 } from './historialMedico.servicio';
 import {
   respuestaExito,
@@ -129,6 +133,10 @@ const esquemaActualizarPrueba = z.object({
   observaciones: z.string().max(500).nullable().optional(),
 });
 
+const esquemaObservacion = z.object({
+  texto: z.string().trim().min(2, 'La observación es requerida').max(1000),
+});
+
 const esquemaFiltros = z.object({
   animalId:  z.string().min(1).optional(),
   fincaId:   z.string().min(1).optional(),
@@ -207,6 +215,46 @@ export async function controladorActualizarPrueba(
     const datos = esquemaActualizarPrueba.parse(req.body);
     const prueba = await actualizarPruebaComplementaria(req.params['id'] as string, datos);
     return respuestaExito(res, prueba);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorAgregarEnfermedad(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = esquemaEnfermedad.parse(req.body);
+    const enfermedad = await agregarEnfermedadDiagnosticada(req.params['id'] as string, datos);
+    return respuestaCreado(res, enfermedad);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorActualizarEnfermedad(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = esquemaEnfermedad.partial().parse(req.body);
+    const enfermedad = await actualizarEnfermedadDiagnosticada(req.params['id'] as string, datos);
+    return respuestaExito(res, enfermedad);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorAgregarTratamiento(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = esquemaTratamiento.parse(req.body);
+    const tratamiento = await agregarTratamiento(req.params['id'] as string, datos);
+    return respuestaCreado(res, tratamiento);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorAgregarObservacion(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const { texto } = esquemaObservacion.parse(req.body);
+    const resultado = await agregarObservacionConsulta(req.params['id'] as string, texto, req.usuarioActual!);
+    return respuestaExito(res, resultado);
   } catch (error) { return next(error); }
 }
 

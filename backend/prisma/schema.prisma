@@ -488,6 +488,9 @@ model EnfermedadDiagnosticada {
   sintomas        String?
   // Resultados de pruebas/exámenes específicos de esta condición diagnosticada
   pruebasDiagnostico String?
+  // Última vez que el diagnóstico se agregó o corrigió después de la consulta
+  // (p. ej. al llegar los resultados de laboratorio); null si no se ha tocado.
+  fechaActualizacion DateTime? @map("fecha_actualizacion")
 
   historialMedicoId String @map("registro_medico_id")
   historialMedico   HistorialMedico @relation(fields: [historialMedicoId], references: [id], onDelete: Cascade)
