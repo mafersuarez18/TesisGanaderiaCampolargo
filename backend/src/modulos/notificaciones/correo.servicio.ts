@@ -46,10 +46,11 @@ export async function enviarCorreoAlerta(
   titulo: string,
   mensaje: string,
   prioridad: PrioridadAlerta
-): Promise<void> {
+): Promise<boolean> {
+  // Devuelve si el correo se envió (false si no hay SMTP configurado).
   if (!entorno.EMAIL_USUARIO) {
     logger.debug('Envío de correo omitido: EMAIL_USUARIO no configurado');
-    return;
+    return false;
   }
 
   const color = obtenerColorPrioridad(prioridad);
@@ -102,6 +103,7 @@ export async function enviarCorreoAlerta(
     subject: `[${etiqueta.toUpperCase()}] ${titulo} — Campolargo`,
     html: htmlCorreo,
   });
+  return true;
 }
 
 export async function enviarCorreoBienvenida(

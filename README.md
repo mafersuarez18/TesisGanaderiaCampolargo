@@ -543,6 +543,11 @@ docker exec campolargo-db pg_dump -U campolargo_admin -Fc -d campolargo > respal
 docker exec -i campolargo-db pg_restore -U campolargo_admin --no-owner -d campolargo < respaldo.dump
 ```
 
+Los compose usan la imagen `postgres:18-alpine`. Un volumen de datos creado con una versión anterior (p. ej. PostgreSQL 16) no se puede abrir con la 18:
+
+- **Desarrollo:** borrar el volumen y recrear la base: `docker compose down -v`, `docker compose up -d`, y luego `npm run db:migrar:prod` y `npm run db:seed` en `backend`.
+- **Producción:** antes de cambiar de versión, sacar un respaldo con `pg_dump` (comando de arriba) desde el contenedor viejo, y restaurarlo con `pg_restore` en el nuevo.
+
 ---
 
 ## Scripts disponibles

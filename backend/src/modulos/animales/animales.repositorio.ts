@@ -1,4 +1,4 @@
-import { Prisma, EstadoAnimal, Sexo } from '@prisma/client';
+import { Prisma, EstadoAnimal, EstadoSanitario, Sexo } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 
 // Acceso a datos puro (consultas Prisma), sin reglas de negocio — esas
@@ -11,6 +11,7 @@ export interface FiltrosAnimal {
   razaId?: string;
   sexo?: Sexo;
   estado?: EstadoAnimal;
+  estadoSanitario?: EstadoSanitario;
   pagina?: number;
   porPagina?: number;
   ordenPor?: 'numeroIdentificacion' | 'nombre' | 'fechaNacimiento' | 'fechaIngreso';
@@ -64,6 +65,7 @@ export async function listarAnimales(filtros: FiltrosAnimal = {}) {
     razaId,
     sexo,
     estado,
+    estadoSanitario,
     pagina = 1,
     porPagina = 20,
     ordenPor = 'fechaIngreso',
@@ -82,6 +84,7 @@ export async function listarAnimales(filtros: FiltrosAnimal = {}) {
     ...(loteId   && { loteId }),
     ...(razaId   && { razaId }),
     ...(sexo     && { sexo }),
+    ...(estadoSanitario && { estadoSanitario }),
     ...(estado   && { estado }),
   };
 

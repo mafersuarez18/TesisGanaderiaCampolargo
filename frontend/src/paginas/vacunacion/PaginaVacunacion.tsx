@@ -123,6 +123,18 @@ const formatearIntervalo = (dias: number) => {
   return `Cada ${dias} días`;
 };
 
+// Estado de una aplicación según su próxima fecha: vencida (ya pasó),
+// próxima (en los próximos DIAS_PROXIMA días) o al día.
+const DIAS_PROXIMA = 30;
+function estadoAplicacion(proximaFecha?: string): { et: string; variante: 'rojo' | 'amarillo' | 'verde' } | null {
+  if (!proximaFecha) return null;
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const dias = Math.round((new Date(proximaFecha).setHours(0, 0, 0, 0) - hoy.getTime()) / 86_400_000);
+  if (dias < 0) return { et: 'Vencida', variante: 'rojo' };
+  if (dias <= DIAS_PROXIMA) return { et: dias === 0 ? 'Vence hoy' : `Vence en ${dias} d`, variante: 'amarillo' };
+  return { et: 'Al día', variante: 'verde' };
+}
+
 const fmtFecha = (s?: string) =>
   s ? new Date(s).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -177,6 +189,20 @@ export default function PaginaVacunacion() {
   });
 
   const registros: RegistroVacunacion[] = respuestaRegistros?.datos ?? [];
+  // Aplicaciones que ya tienen una posterior del mismo animal y vacuna: su
+  // próxima fecha ya no cuenta (se muestran como "Renovada").
+  const renovadas = new Set<string>();
+  {
+    const ultima = new Map<string, RegistroVacunacion>();
+    for (const r of registros) {
+      const clave = `${r.animal.id}::${r.calendarioVacunacion.id}`;
+      const previa = ultima.get(clave);
+      if (!previa) { ultima.set(clave, r); continue; }
+      const masReciente = new Date(r.fechaAplicacion) > new Date(previa.fechaAplicacion) ? r : previa;
+      renovadas.add((masReciente === r ? previa : r).id);
+      ultima.set(clave, masReciente);
+    }
+  }
 
   const { data: cumplimientoPorLote = [], isLoading: cargandoCumplimiento } = useQuery<CumplimientoLote[]>({
     queryKey: ['cumplimiento-vacunacion-lote'],
@@ -477,10 +503,19 @@ export default function PaginaVacunacion() {
                           {reg.aplicadoPor.nombre} {reg.aplicadoPor.apellido}
                         </p>
                         {reg.proximaFecha && (
-                          <p className="text-xs text-tertiary flex items-center gap-1 justify-end mt-1">
-                            <Icono nombre="event_upcoming" clase="text-[12px]" />
-                            Próx: {new Date(reg.proximaFecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
-                          </p>
+                          <div className="flex items-center gap-1.5 justify-end mt-1">
+                            <span className="text-xs text-on-surface-variant flex items-center gap-1">
+                              <Icono nombre="event_upcoming" clase="text-[12px]" />
+                              Próx: {new Date(reg.proximaFecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
+                            </span>
+                            {renovadas.has(reg.id) ? (
+                              <Badge variante="gris" tamano="xs">Renovada</Badge>
+                            ) : estadoAplicacion(reg.proximaFecha) && (
+                              <Badge variante={estadoAplicacion(reg.proximaFecha)!.variante} tamano="xs">
+                                {estadoAplicacion(reg.proximaFecha)!.et}
+                              </Badge>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

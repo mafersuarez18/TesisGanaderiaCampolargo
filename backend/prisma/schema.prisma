@@ -1021,7 +1021,6 @@ model ReglaAlerta {
   creadoPorId String @map("usuarioCreador_id")
   creadoPor   Usuario @relation(fields: [creadoPorId], references: [id])
 
-  notificaciones Notificacion[]
   usuariosNotificados ReglaAlertaUsuario[]
 
   @@map("regla_alerta")
@@ -1064,7 +1063,6 @@ model Notificacion {
   // alerta, por reglaUsuarioId — la asignación regla-usuario (REGLA_USUARIO
   // del modelo lógico del tomo) de la que se deriva el destinatario.
   usuarioId   String?
-  reglaId     String?
   reglaUsuarioId String? @map("regla_usuario_id")
 
   // Cascade en ambos: si desaparece el usuario directo o la asignación
@@ -1072,7 +1070,6 @@ model Notificacion {
   // conservarla (dejaría usuarioId y reglaUsuarioId nulos a la vez, lo que
   // viola el CHECK), así que se elimina junto con su origen.
   usuario      Usuario?            @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
-  regla        ReglaAlerta?        @relation(fields: [reglaId], references: [id], onDelete: SetNull)
   reglaUsuario ReglaAlertaUsuario? @relation(fields: [reglaUsuarioId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId])

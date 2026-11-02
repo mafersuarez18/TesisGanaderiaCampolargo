@@ -79,8 +79,10 @@ export async function evaluarTodasLasReglas(
 
       switch (regla.tipoAlerta) {
         case TipoAlertaRegla.VACUNA_VENCIDA:
+          await evaluarVacunas(umbral, prioridad, regla, 'vencidas');
+          break;
         case TipoAlertaRegla.VACUNA_PROXIMA:
-          await evaluarVacunas(umbral, prioridad, regla);
+          await evaluarVacunas(umbral, prioridad, regla, 'proximas');
           break;
         case TipoAlertaRegla.PARTO_PROXIMO:
           await evaluarPartosProximos(umbral, prioridad, regla);
@@ -146,6 +148,7 @@ function defaultUmbral(tipo: TipoAlertaRegla): number {
 type ReglaDb = {
   id: string;
   nombre: string;
+  enviarCorreo: boolean;
   usuariosNotificados: {
     id: string;
     usuario: { id: string; correo: string; nombre: string; estado: string };
@@ -154,18 +157,27 @@ type ReglaDb = {
 
 // ── Evaluadores individuales ──────────────────────────────────────────────────
 
-/** Vacunas próximas a vencer o ya vencidas */
+/**
+ * Vacunas próximas a vencer (próxima fecha entre hoy y hoy + umbral) o ya
+ * vencidas (próxima fecha anterior a hoy menos el umbral de tolerancia).
+ * Cada tipo de regla mira solo su tramo, para que una regla de "vacuna
+ * próxima" no avise también de todas las vencidas.
+ */
 async function evaluarVacunas(
   diasUmbral: number,
   prioridad: PrioridadAlerta,
   regla: ReglaDb,
+  cuales: 'proximas' | 'vencidas',
 ): Promise<void> {
   const hoy    = new Date();
-  const limite = new Date(hoy.getTime() + diasUmbral * 86_400_000);
+  const inicioHoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  const rango = cuales === 'proximas'
+    ? { gte: inicioHoy, lte: new Date(hoy.getTime() + diasUmbral * 86_400_000) }
+    : { lt: new Date(inicioHoy.getTime() - diasUmbral * 86_400_000) };
 
   const vacunasProximas = await prisma.registroVacunacion.findMany({
     where: {
-      proximaFecha: { lte: limite },
+      proximaFecha: rango,
       animal: { estado: 'ACTIVO' },
     },
     include: {
@@ -666,8 +678,17 @@ async function crearNotificacionSiNoExiste(
 ): Promise<void> {
   const hace24h = new Date(Date.now() - 24 * 3_600_000);
 
+  // El duplicado se busca por regla: si dos reglas distintas cubren la misma
+  // entidad (p. ej. una regla nueva de vacuna próxima), cada una avisa a sus
+  // propios destinatarios. Sin regla, se compara con las alertas del sistema.
   const yaExiste = await prisma.notificacion.findFirst({
-    where: { entidadId, entidadTipo, leida: false, creadoEn: { gte: hace24h } },
+    where: {
+      entidadId,
+      entidadTipo,
+      leida: false,
+      creadoEn: { gte: hace24h },
+      ...(regla ? { reglaUsuario: { reglaAlertaId: regla.id } } : { reglaUsuarioId: null }),
+    },
     select: { id: true },
   });
   if (yaExiste) return;
@@ -692,7 +713,7 @@ async function crearNotificacionSiNoExiste(
       ).map((usuario) => ({ usuario, reglaUsuarioId: null }));
 
   for (const { usuario, reglaUsuarioId } of destinatarios) {
-    await prisma.notificacion.create({
+    const notificacion = await prisma.notificacion.create({
       data: {
         titulo,
         mensaje,
@@ -703,14 +724,22 @@ async function crearNotificacionSiNoExiste(
         // Exactamente uno de usuarioId / reglaUsuarioId, nunca ambos ni ninguno
         // (ver CHECK "notificacion_destinatario_unico" en el esquema).
         ...(reglaUsuarioId ? { reglaUsuarioId } : { usuarioId: usuario.id }),
-        ...(regla && { reglaId: regla.id }),
       },
     });
 
+    // Solo se envía correo si la regla lo tiene activado ("Enviar correo");
+    // las alertas del sistema sin regla se quedan en la app.
+    if (!regla?.enviarCorreo) continue;
     try {
-      await enviarCorreoAlerta(usuario.correo, usuario.nombre, titulo, mensaje, prioridad);
-    } catch {
-      logger.warn(`No se pudo enviar correo de alerta a ${usuario.correo}`);
+      const enviado = await enviarCorreoAlerta(usuario.correo, usuario.nombre, titulo, mensaje, prioridad);
+      if (enviado) {
+        await prisma.notificacion.update({
+          where: { id: notificacion.id },
+          data: { correoEnviado: true, fechaCorreo: new Date() },
+        });
+      }
+    } catch (error) {
+      logger.warn(`No se pudo enviar correo de alerta a ${usuario.correo}: ${String(error)}`);
     }
   }
 }

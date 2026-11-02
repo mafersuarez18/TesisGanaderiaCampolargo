@@ -579,6 +579,25 @@ export default function PaginaHistorialMedico() {
                     PDF esta consulta
                   </button>
                   <button
+                    onClick={async () => {
+                      // Historial clínico completo del animal (todas sus consultas,
+                      // vacunas, tratamientos y pruebas), no solo esta consulta.
+                      try {
+                        const animal = historialSeleccionado.animal;
+                        const r = await clienteHttp.get(`/reportes/historial-animal/${animal.id}`, { responseType: 'blob' });
+                        const url = URL.createObjectURL(new Blob([r.data], { type: 'application/pdf' }));
+                        const a = document.createElement('a'); a.href = url;
+                        a.download = `historial_${animal.numeroIdentificacion}.pdf`; a.click();
+                        URL.revokeObjectURL(url);
+                      } catch { /* silencioso */ }
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl
+                               bg-error/10 text-error hover:bg-error/20 transition-colors text-xs font-medium"
+                  >
+                    <Icono nombre="description" clase="text-[15px]" />
+                    Historial completo (PDF)
+                  </button>
+                  <button
                     onClick={() => navigate(`/animales/${historialSeleccionado.animal.id}`)}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl
                                bg-primary/10 text-primary hover:bg-primary/20 transition-colors text-xs font-medium"

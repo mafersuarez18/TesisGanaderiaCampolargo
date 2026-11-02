@@ -87,6 +87,8 @@ interface Indicadores {
   animalesConRepeticion: number;
   tasaRepeticionCelo: number;
   intervaloPartosPromedioDias: number | null;
+  diasAbiertosPromedio: number | null;
+  hembrasConDiasAbiertos: number;
 }
 
 // ── Mapeo de tipos — usa los valores del enum TipoEventoReproductivo ──────────
@@ -129,6 +131,8 @@ export default function PaginaReproduccion() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [anioIndicadores, setAnioIndicadores] = useState(new Date().getFullYear());
   const [fincaIndicadores, setFincaIndicadores] = useState('');
+  const [loteIndicadores, setLoteIndicadores] = useState('');
+  const [razaIndicadores, setRazaIndicadores] = useState('');
   const [servicioAConfirmar, setServicioAConfirmar] = useState<ServicioAConfirmar | null>(null);
   const [prenadaInicial, setPrenadaInicial] = useState(true);
   const [gestacionACerrar, setGestacionACerrar] = useState<GestacionACerrar | null>(null);
@@ -172,11 +176,27 @@ export default function PaginaReproduccion() {
     enabled: pestana === 'indicadores',
   });
 
+  const { data: lotesIndicadores = [] } = useQuery<{ id: string; nombre: string; fincaId: string }[]>({
+    queryKey: ['lotes-select'],
+    queryFn: () => clienteHttp.get('/lotes').then((r) => r.data.datos ?? []),
+    enabled: pestana === 'indicadores',
+  });
+  const { data: razasIndicadores = [] } = useQuery<{ id: string; nombre: string }[]>({
+    queryKey: ['razas-select'],
+    queryFn: () => clienteHttp.get('/animales/razas').then((r) => r.data.datos ?? []),
+    enabled: pestana === 'indicadores',
+  });
+
   const { data: indicadoresData, isLoading: cargandoIndicadores } = useQuery<Indicadores>({
-    queryKey: ['indicadores-reproductivos', anioIndicadores, fincaIndicadores],
+    queryKey: ['indicadores-reproductivos', anioIndicadores, fincaIndicadores, loteIndicadores, razaIndicadores],
     queryFn: () =>
       clienteHttp.get('/reproduccion/indicadores', {
-        params: { anio: anioIndicadores, ...(fincaIndicadores && { fincaId: fincaIndicadores }) },
+        params: {
+          anio: anioIndicadores,
+          ...(fincaIndicadores && { fincaId: fincaIndicadores }),
+          ...(loteIndicadores && { loteId: loteIndicadores }),
+          ...(razaIndicadores && { razaId: razaIndicadores }),
+        },
       }).then((r) => r.data.datos),
     enabled: pestana === 'indicadores',
   });
@@ -490,7 +510,7 @@ export default function PaginaReproduccion() {
           <motion.div key="indicadores" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
             className="space-y-5">
 
-            {/* Filtros: año + finca */}
+            {/* Filtros: año, finca, lote y raza */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
                 <label className="text-xs font-semibold text-on-surface-variant">Año:</label>
@@ -509,7 +529,7 @@ export default function PaginaReproduccion() {
                   <label className="text-xs font-semibold text-on-surface-variant">Finca:</label>
                   <select
                     value={fincaIndicadores}
-                    onChange={(e) => setFincaIndicadores(e.target.value)}
+                    onChange={(e) => { setFincaIndicadores(e.target.value); setLoteIndicadores(''); }}
                     className="campo-entrada text-sm"
                   >
                     <option value="">Todas las fincas</option>
@@ -519,6 +539,30 @@ export default function PaginaReproduccion() {
                   </select>
                 </div>
               )}
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-on-surface-variant">Lote:</label>
+                <select
+                  value={loteIndicadores}
+                  onChange={(e) => setLoteIndicadores(e.target.value)}
+                  className="campo-entrada text-sm"
+                >
+                  <option value="">Todos los lotes</option>
+                  {lotesIndicadores
+                    .filter((l) => !fincaIndicadores || l.fincaId === fincaIndicadores)
+                    .map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs font-semibold text-on-surface-variant">Raza:</label>
+                <select
+                  value={razaIndicadores}
+                  onChange={(e) => setRazaIndicadores(e.target.value)}
+                  className="campo-entrada text-sm"
+                >
+                  <option value="">Todas las razas</option>
+                  {razasIndicadores.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}
+                </select>
+              </div>
             </div>
 
             {cargandoIndicadores ? (
@@ -612,6 +656,13 @@ export default function PaginaReproduccion() {
                       { et: 'Partos registrados',    val: indicadoresData.gestacionesParto,    ico: 'child_care', col: 'text-tertiary' },
                       { et: 'Gestaciones en curso',  val: indicadoresData.gestacionesEnCurso,  ico: 'hourglass_top', col: 'text-primary' },
                       {
+                        et: 'Días abiertos (promedio)',
+                        val: indicadoresData.diasAbiertosPromedio != null
+                          ? `${indicadoresData.diasAbiertosPromedio}d`
+                          : '—',
+                        ico: 'event_busy', col: 'text-tertiary',
+                      },
+                      {
                         et: 'Intervalo entre partos',
                         val: indicadoresData.intervaloPartosPromedioDias != null
                           ? `${indicadoresData.intervaloPartosPromedioDias}d`
@@ -637,6 +688,8 @@ export default function PaginaReproduccion() {
                   <Icono nombre="info" clase="text-[18px] text-primary flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-on-surface-variant leading-relaxed">
                     <span className="font-semibold text-on-surface">Tasa de preñez</span> = gestaciones activas / hembras activas.
+                    {' '}<span className="font-semibold text-on-surface">Días abiertos</span> = días entre el último parto de cada hembra
+                    y su nueva concepción (o hasta hoy, si aún no ha vuelto a preñarse).
                     {' '}<span className="font-semibold text-on-surface">Repetición de celo</span> = animales con ≥2 detecciones
                     de celo sin gestación exitosa entre ellas, sobre el total de inseminaciones.
                     Referencia: preñez ≥ 60 %, natalidad ≥ 80 %, aborto ≤ 5 %, repetición ≤ 15 %.

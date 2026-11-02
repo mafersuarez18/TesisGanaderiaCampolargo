@@ -50,6 +50,7 @@ const esquemaFiltros = z.object({
   razaId:         z.string().min(1).optional(),
   sexo:           z.nativeEnum(Sexo).optional(),
   estado:         z.nativeEnum(EstadoAnimal).optional(),
+  estadoSanitario: z.nativeEnum(EstadoSanitario).optional(),
   pagina:         z.coerce.number().int().positive().default(1),
   porPagina:      z.coerce.number().int().positive().max(500).default(20),
   ordenPor:       z.enum(['numeroIdentificacion', 'nombre', 'fechaNacimiento', 'fechaIngreso']).default('fechaIngreso'),

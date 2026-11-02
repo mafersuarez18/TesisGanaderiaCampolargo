@@ -101,10 +101,11 @@ const COLUMNAS: ColumnaTabla<Animal>[] = [
     encabezado: 'Sanitario',
     render: (a) => {
       const mapa: Record<string, { var_: 'verde' | 'rojo' | 'amarillo' | 'gris'; et: string }> = {
-        SANO:          { var_: 'verde',    et: 'Sano' },
-        ENFERMO:       { var_: 'rojo',     et: 'Enfermo' },
-        EN_CUARENTENA: { var_: 'amarillo', et: 'Cuarentena' },
-        FALLECIDO:     { var_: 'gris',     et: 'Fallecido' },
+        SANO:           { var_: 'verde',    et: 'Sano' },
+        ENFERMO:        { var_: 'rojo',     et: 'Enfermo' },
+        EN_TRATAMIENTO: { var_: 'amarillo', et: 'En tratamiento' },
+        EN_OBSERVACION: { var_: 'amarillo', et: 'En observación' },
+        CUARENTENA:     { var_: 'rojo',     et: 'Cuarentena' },
       };
       const cfg = mapa[a.estadoSanitario] ?? { var_: 'gris', et: a.estadoSanitario };
       return <Badge variante={cfg.var_} tamano="xs" punto>{cfg.et}</Badge>;
@@ -178,6 +179,8 @@ export default function PaginaAnimales() {
   const [busqueda, setBusqueda]         = useState('');
   const [filtroFinca, setFiltroFinca]   = useState('');
   const [filtroRaza, setFiltroRaza]     = useState('');
+  const [filtroLote, setFiltroLote]     = useState('');
+  const [filtroSanitario, setFiltroSanitario] = useState('');
   const [filtroSexo, setFiltroSexo]     = useState('');
   const [filtroEstado, setFiltroEstado] = useState('ACTIVO');
   const [panelFiltros, setPanelFiltros] = useState(false);
@@ -189,7 +192,9 @@ export default function PaginaAnimales() {
     porPagina: '25',
     ...(busquedaDebounced && { busqueda: busquedaDebounced }),
     ...(filtroFinca  && { fincaId: filtroFinca }),
+    ...(filtroLote   && { loteId:  filtroLote }),
     ...(filtroRaza   && { razaId:  filtroRaza }),
+    ...(filtroSanitario && { estadoSanitario: filtroSanitario }),
     ...(filtroSexo   && { sexo:    filtroSexo }),
     ...(filtroEstado && { estado:  filtroEstado }),
   };
@@ -202,13 +207,18 @@ export default function PaginaAnimales() {
 
   const { data: fincas = [] } = useQuery({ queryKey: ['fincas-select'], queryFn: obtenerFincas });
   const { data: razas  = [] } = useQuery({ queryKey: ['razas-select'],  queryFn: obtenerRazas });
+  const { data: lotes  = [] } = useQuery<{ id: string; nombre: string; fincaId: string }[]>({
+    queryKey: ['lotes-select'],
+    queryFn: () => clienteHttp.get('/lotes').then((r) => r.data.datos ?? []),
+  });
+  const lotesDeLaFinca = filtroFinca ? lotes.filter((l) => l.fincaId === filtroFinca) : lotes;
 
   const limpiarFiltros = useCallback(() => {
-    setBusqueda(''); setFiltroFinca(''); setFiltroRaza('');
+    setBusqueda(''); setFiltroFinca(''); setFiltroRaza(''); setFiltroLote(''); setFiltroSanitario('');
     setFiltroSexo(''); setFiltroEstado('ACTIVO'); setPagina(1);
   }, []);
 
-  const hayFiltrosActivos = busqueda || filtroFinca || filtroRaza || filtroSexo || filtroEstado !== 'ACTIVO';
+  const hayFiltrosActivos = busqueda || filtroFinca || filtroLote || filtroRaza || filtroSanitario || filtroSexo || filtroEstado !== 'ACTIVO';
 
   // Reutiliza el mismo reporte de inventario que "Reportes" (con los
   // filtros de finca/estado ya aplicados en esta pantalla), en vez de
@@ -333,17 +343,28 @@ export default function PaginaAnimales() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-4 pt-4 border-t border-outline-variant/30 grid grid-cols-2 sm:grid-cols-4 gap-3"
+            className="mt-4 pt-4 border-t border-outline-variant/30 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3"
           >
             <div>
               <label className="block text-xs font-medium text-on-surface-variant mb-1">Finca</label>
               <select
                 value={filtroFinca}
-                onChange={(e) => { setFiltroFinca(e.target.value); setPagina(1); }}
+                onChange={(e) => { setFiltroFinca(e.target.value); setFiltroLote(''); setPagina(1); }}
                 className="campo-entrada py-1.5 text-xs"
               >
                 <option value="">Todas las fincas</option>
                 {fincas.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-on-surface-variant mb-1">Lote</label>
+              <select
+                value={filtroLote}
+                onChange={(e) => { setFiltroLote(e.target.value); setPagina(1); }}
+                className="campo-entrada py-1.5 text-xs"
+              >
+                <option value="">Todos los lotes</option>
+                {lotesDeLaFinca.map((l) => <option key={l.id} value={l.id}>{l.nombre}</option>)}
               </select>
             </div>
             <div>
@@ -367,6 +388,21 @@ export default function PaginaAnimales() {
                 <option value="">Ambos</option>
                 <option value="MACHO">Macho</option>
                 <option value="HEMBRA">Hembra</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-on-surface-variant mb-1">Estado sanitario</label>
+              <select
+                value={filtroSanitario}
+                onChange={(e) => { setFiltroSanitario(e.target.value); setPagina(1); }}
+                className="campo-entrada py-1.5 text-xs"
+              >
+                <option value="">Todos</option>
+                <option value="SANO">Sano</option>
+                <option value="ENFERMO">Enfermo</option>
+                <option value="EN_TRATAMIENTO">En tratamiento</option>
+                <option value="EN_OBSERVACION">En observación</option>
+                <option value="CUARENTENA">Cuarentena</option>
               </select>
             </div>
             <div className="flex items-end">

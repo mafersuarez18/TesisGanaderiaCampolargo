@@ -1,7 +1,7 @@
 services:
   # Base de datos PostgreSQL
   base-datos:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: campolargo-db
     restart: unless-stopped
     environment:

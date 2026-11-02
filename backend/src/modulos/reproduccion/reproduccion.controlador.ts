@@ -132,11 +132,13 @@ export async function controladorIndicadores(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const { anio, fincaId } = z.object({
+    const { anio, ...filtros } = z.object({
       anio:    z.coerce.number().int().min(2000).max(2100).default(() => new Date().getFullYear()),
       fincaId: z.string().min(1).optional(),
+      loteId:  z.string().min(1).optional(),
+      razaId:  z.string().min(1).optional(),
     }).parse(req.query);
-    const indicadores = await obtenerIndicadoresReproductivos(anio, fincaId);
+    const indicadores = await obtenerIndicadoresReproductivos(anio, filtros);
     return respuestaExito(res, indicadores);
   } catch (error) { return next(error); }
 }
