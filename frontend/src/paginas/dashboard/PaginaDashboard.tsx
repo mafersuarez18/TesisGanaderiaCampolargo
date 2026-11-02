@@ -86,8 +86,6 @@ function construirExplicaciones(
   recurrencia?: RecurrenciaPatologias,
 ): Record<string, ExplicacionIndicador> {
   const d = resumen?.detalleIndicadores;
-  const desde = d ? new Date(d.desdeNacimientos).toLocaleDateString('es-VE') : `01/01/${new Date().getFullYear() - 1}`;
-
   return {
     totalAnimales: {
       titulo: 'Total Animales',
@@ -123,27 +121,27 @@ function construirExplicaciones(
     },
     natalidad: {
       titulo: 'Tasa de Natalidad',
-      descripcion: `Nacimientos registrados desde el ${desde} en relación con las hembras activas.`,
-      formula: 'Nacimientos ÷ hembras activas × 100',
+      descripcion: 'Crías nacidas en los últimos 12 meses en relación con las hembras activas. A diferencia de la preñez (gestaciones que vienen), mide los partos que ya ocurrieron.',
+      formula: 'Crías nacidas (últimos 12 meses) ÷ hembras activas × 100',
       calculo: d ? porcentaje(d.nacimientos, d.hembrasActivas, 'Sin hembras activas') : undefined,
-      nota: 'Cuenta los nacimientos desde el 1 de enero del año anterior, no solo los de los últimos 12 meses.',
+      nota: 'Es la misma definición que en Reproducción → Indicadores, donde se calcula por año.',
     },
     mortalidad: {
       titulo: 'Mortalidad de Crías',
-      descripcion: `Crías muertas en los últimos 365 días (animales con estado Muerto más las crías que nacieron muertas o murieron en sus primeras 24 h según el registro del parto), en relación con los nacimientos registrados desde el ${desde}.`,
+      descripcion: `Crías muertas en los últimos 365 días (animales con estado Muerto más las crías que nacieron muertas o murieron en sus primeras 24 h según el registro del parto), en relación con las crías nacidas en los últimos 12 meses.`,
       formula: 'Crías muertas ÷ nacimientos × 100',
       calculo: d ? porcentaje(d.muertesCrias, d.nacimientos, 'Sin nacimientos registrados') : undefined,
     },
     diasAbiertos: {
       titulo: 'Días Abiertos',
-      descripcion: 'Promedio de días transcurridos desde cada parto registrado (gestaciones finalizadas por parto) hasta hoy, contando como máximo 365 días por parto.',
-      formula: 'Suma de días desde cada parto ÷ cantidad de partos',
+      descripcion: 'Promedio de días entre el último parto de cada hembra y su nueva concepción. Si todavía no ha vuelto a quedar preñada, se cuentan los días transcurridos hasta hoy.',
+      formula: 'Suma de días abiertos de cada hembra ÷ hembras con parto registrado',
       calculo: d
         ? (d.partosConsiderados > 0
-          ? `Promedio sobre ${d.partosConsiderados} partos = ${resumen!.indicadoresReproductivos.diasAbiertoPromedio} días`
-          : 'Sin partos registrados: se muestra el valor de referencia de 120 días')
+          ? `Promedio sobre ${d.partosConsiderados} hembras = ${resumen!.indicadoresReproductivos.diasAbiertoPromedio} días`
+          : 'Sin partos registrados todavía')
         : undefined,
-      nota: 'Es una aproximación: mide los días desde el último parto aunque la vaca ya haya quedado preñada de nuevo.',
+      nota: 'Es la misma definición que en Reproducción → Indicadores.',
     },
     tratados: {
       titulo: 'Animales tratados este año',

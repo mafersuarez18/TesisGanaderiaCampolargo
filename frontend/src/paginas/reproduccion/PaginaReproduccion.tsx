@@ -80,6 +80,7 @@ interface Indicadores {
   criasFallecidas: number;
   tasaPreniez: number;
   tasaNatalidad: number;
+  tasaGestacionesATermino: number;
   tasaAborto: number;
   tasaMortalidadCrias: number;
   totalCelos: number;
@@ -595,9 +596,16 @@ export default function PaginaReproduccion() {
                       {
                         et: 'Tasa de Natalidad',
                         val: `${indicadoresData.tasaNatalidad}%`,
-                        sub: `${indicadoresData.gestacionesParto} partos de ${indicadoresData.gestacionesAnio} gest.`,
+                        sub: `${indicadoresData.nacimientosAnio} crías de ${indicadoresData.totalHembras} hembras`,
                         ico: 'child_care', col: 'text-tertiary', fondo: 'bg-tertiary/10',
-                        bueno: indicadoresData.tasaNatalidad >= 80,
+                        bueno: indicadoresData.tasaNatalidad >= 70,
+                      },
+                      {
+                        et: 'Gestaciones a término',
+                        val: `${indicadoresData.tasaGestacionesATermino}%`,
+                        sub: `${indicadoresData.gestacionesParto} partos de ${indicadoresData.gestacionesAnio} gest. del año`,
+                        ico: 'task_alt', col: 'text-primary', fondo: 'bg-primary/10',
+                        bueno: indicadoresData.tasaGestacionesATermino >= 80,
                       },
                       {
                         et: 'Tasa de Aborto',
@@ -692,7 +700,9 @@ export default function PaginaReproduccion() {
                     y su nueva concepción (o hasta hoy, si aún no ha vuelto a preñarse).
                     {' '}<span className="font-semibold text-on-surface">Repetición de celo</span> = animales con ≥2 detecciones
                     de celo sin gestación exitosa entre ellas, sobre el total de inseminaciones.
-                    Referencia: preñez ≥ 60 %, natalidad ≥ 80 %, aborto ≤ 5 %, repetición ≤ 15 %.
+                    {' '}<span className="font-semibold text-on-surface">Natalidad</span> = crías nacidas en el año / hembras activas.
+                    {' '}<span className="font-semibold text-on-surface">Gestaciones a término</span> = gestaciones del año que terminaron en parto.
+                    Referencia: preñez ≥ 60 %, natalidad ≥ 70 %, gestaciones a término ≥ 80 %, aborto ≤ 5 %, repetición ≤ 15 %.
                   </p>
                 </div>
               </>

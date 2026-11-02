@@ -610,7 +610,11 @@ export async function obtenerIndicadoresReproductivos(anio: number, filtros: Fil
     nacimientosAnio,
     criasFallecidas,
     tasaPreniez:        totalHembras > 0 ? +((gestacionesEnCurso / totalHembras) * 100).toFixed(1) : 0,
-    tasaNatalidad:      gestacionesAnio > 0 ? +((gestacionesParto / gestacionesAnio) * 100).toFixed(1) : 0,
+    // Natalidad = crías nacidas en el año / hembras activas (misma definición
+    // que el dashboard). "Gestaciones a término" es la proporción de las
+    // gestaciones del año que terminaron en parto.
+    tasaNatalidad:      totalHembras > 0 ? +((nacimientosAnio / totalHembras) * 100).toFixed(1) : 0,
+    tasaGestacionesATermino: gestacionesAnio > 0 ? +((gestacionesParto / gestacionesAnio) * 100).toFixed(1) : 0,
     tasaAborto:         gestacionesAnio > 0 ? +((abortos / gestacionesAnio) * 100).toFixed(1) : 0,
     tasaMortalidadCrias: nacimientosAnio > 0 ? +((criasFallecidas / nacimientosAnio) * 100).toFixed(1) : 0,
     totalCelos,
@@ -660,7 +664,7 @@ async function calcularIntervaloPartosPromedio(filtroAnimal: Prisma.AnimalWhereI
 // período) hasta su siguiente concepción; si todavía no volvió a preñarse y
 // sigue activa, se cuentan los días transcurridos hasta hoy (o hasta el fin
 // del período, si ya pasó).
-async function calcularDiasAbiertos(filtroAnimal: Prisma.AnimalWhereInput, finPeriodo: Date) {
+export async function calcularDiasAbiertos(filtroAnimal: Prisma.AnimalWhereInput, finPeriodo: Date) {
   const gestaciones = await prisma.gestacion.findMany({
     where: { madre: { ...filtroAnimal, sexo: Sexo.HEMBRA } },
     select: {

@@ -1,4 +1,5 @@
 import { prisma } from '../../compartido/prisma/clientePrisma';
+import { calcularDiasAbiertos } from '../reproduccion/reproduccion.servicio';
 import { EstadoAnimal, EstadoSanitario, PrioridadAlerta, EstadoGestacion, EstadoCria } from '@prisma/client';
 
 // Indicadores agregados para el dashboard y los reportes analíticos: todo
@@ -7,6 +8,10 @@ import { EstadoAnimal, EstadoSanitario, PrioridadAlerta, EstadoGestacion, Estado
 
 export async function obtenerResumenDashboard() {
   // Ejecutar todas las consultas en paralelo para minimizar latencia
+  // Ventana de 12 meses para natalidad y mortalidad de crías (misma
+  // definición que en Reproducción → Indicadores: crías nacidas / hembras activas).
+  const haceDoceMeses = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+
   const [
     totalAnimales,
     animalesPorFinca,
@@ -75,13 +80,9 @@ export async function obtenerResumenDashboard() {
     // Gestaciones activas para calcular tasa de preñez
     prisma.gestacion.count({ where: { estadoGestacion: EstadoGestacion.EN_CURSO } }),
 
-    // Nacimientos del último año para calcular tasa de natalidad
+    // Nacimientos de los últimos 12 meses para calcular tasa de natalidad
     prisma.nacimiento.count({
-      where: {
-        fechaNacimiento: {
-          gte: new Date(new Date().getFullYear() - 1, 0, 1),
-        },
-      },
+      where: { fechaNacimiento: { gte: haceDoceMeses } },
     }),
   ]);
 
@@ -106,14 +107,17 @@ export async function obtenerResumenDashboard() {
     ? (nacimientos / hembrasTotales) * 100
     : 0;
 
-  // Días abiertos: promedio de tiempo entre parto y nueva gestación (simplificado)
-  const { promedio: diasAbiertoPromedio, partosConsiderados } = await calcularDiasAbiertoPromedio();
+  // Días abiertos: días del último parto de cada hembra a su nueva concepción
+  // (o hasta hoy si no ha vuelto a preñarse). Misma función que Reproducción.
+  const diasAbiertos = await calcularDiasAbiertos({}, new Date());
+  const diasAbiertoPromedio = diasAbiertos.promedio ?? 0;
+  const partosConsiderados = diasAbiertos.hembras;
 
   // Mortalidad de crías: animales muertos nacidos en el último año, más las
   // crías que nacieron muertas (o murieron en sus primeras 24 h) según el
   // registro del parto y que nunca se dieron de alta como animal — sin
   // criaId, para no contar dos veces a una cría registrada.
-  const haceUnAnio = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+  const haceUnAnio = haceDoceMeses;
   const [animalesMuertos, criasNacidasMuertas] = await Promise.all([
     prisma.animal.count({
       where: { estado: EstadoAnimal.MUERTO, fechaNacimiento: { gte: haceUnAnio } },
@@ -156,37 +160,11 @@ export async function obtenerResumenDashboard() {
       hembrasActivas: hembrasTotales,
       gestacionesEnCurso: gestacionesActivas,
       nacimientos,
-      desdeNacimientos: new Date(new Date().getFullYear() - 1, 0, 1),
+      desdeNacimientos: haceDoceMeses,
       muertesCrias: muertesNeonatos,
       partosConsiderados,
     },
   };
-}
-
-async function calcularDiasAbiertoPromedio(): Promise<{ promedio: number; partosConsiderados: number }> {
-  // Calcula promedio de días entre último parto y fecha actual (o nueva gestación),
-  // sobre la totalidad del historial de gestaciones finalizadas en parto.
-  const gestacionesConParto = await prisma.gestacion.findMany({
-    where: { estadoGestacion: EstadoGestacion.FINALIZADA_PARTO },
-    select: {
-      fechaPartoEsperado: true,
-      madreId: true,
-    },
-    orderBy: { fechaPartoEsperado: 'desc' },
-  });
-
-  // Sin partos registrados se devuelve el valor de referencia para ganadería bovina
-  if (gestacionesConParto.length === 0) return { promedio: 120, partosConsiderados: 0 };
-
-  const diasTotales = gestacionesConParto.reduce((acc, g) => {
-    const diasDesdeUltimoParto = Math.max(
-      0,
-      Math.floor((Date.now() - g.fechaPartoEsperado.getTime()) / (1000 * 60 * 60 * 24)),
-    );
-    return acc + Math.min(diasDesdeUltimoParto, 365); // Máximo 1 año de cálculo
-  }, 0);
-
-  return { promedio: diasTotales / gestacionesConParto.length, partosConsiderados: gestacionesConParto.length };
 }
 
 export async function obtenerEvolucionMensual(anio: number) {
