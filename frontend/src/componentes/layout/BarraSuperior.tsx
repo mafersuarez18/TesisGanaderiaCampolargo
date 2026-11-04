@@ -231,7 +231,8 @@ export default function BarraSuperior({ alAbrirMenu }: PropiedadesBarraSuperior)
                   animate={{ opacity: 1 }}
                   onClick={() => setBusquedaActiva(true)}
                   className="p-2 hover:bg-primary/10 transition-colors rounded-full text-on-surface-variant"
-                  aria-label="Buscar"
+                  title="Buscar animal"
+                  aria-label="Buscar animal"
                 >
                   <Icono nombre="search" />
                 </motion.button>

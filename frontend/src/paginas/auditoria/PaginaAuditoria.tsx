@@ -57,7 +57,41 @@ const RECURSO_ICONO: Record<string, string> = {
   Animal:        'pets',
   Usuario:       'person',
   Autenticacion: 'shield',
+  HistorialMedico: 'medical_services',
+  EnfermedadDiagnosticada: 'coronavirus',
+  Tratamiento:   'medication',
+  PruebaComplementaria: 'biotech',
+  RegistroVacunacion: 'vaccines',
+  CalendarioVacunacion: 'event_note',
+  EventoReproductivo: 'favorite',
+  Gestacion:     'vaca_prenada',
+  InseminacionArtificial: 'science',
+  Reporte:       'description',
+  ReglaAlerta:   'notifications',
+  Finca:         'agriculture',
+  Lote:          'grid_view',
   default:       'inventory_2',
+};
+
+// "Recurso" = tipo de registro sobre el que se hizo la acción
+const RECURSO_ETIQUETA: Record<string, string> = {
+  Animal: 'Animal',
+  HistorialMedico: 'Consulta médica',
+  EnfermedadDiagnosticada: 'Diagnóstico',
+  Tratamiento: 'Tratamiento',
+  PruebaComplementaria: 'Prueba complementaria',
+  RegistroVacunacion: 'Vacunación',
+  CalendarioVacunacion: 'Calendario de vacunación',
+  EventoReproductivo: 'Evento reproductivo',
+  Gestacion: 'Gestación',
+  InseminacionArtificial: 'Inseminación',
+  ActividadPlanSanitario: 'Plan sanitario',
+  ReglaAlerta: 'Regla de alerta',
+  Usuario: 'Usuario',
+  Finca: 'Finca',
+  Lote: 'Lote',
+  Reporte: 'Reporte',
+  Autenticacion: 'Sesión',
 };
 
 // Solo las acciones que existen en la BD (las más comunes primero)
@@ -219,11 +253,17 @@ export default function PaginaAuditoria() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Recurso</label>
-                <input
-                  type="text" value={recursoFiltro} placeholder="Animal, Usuario..."
+                <select
+                  value={recursoFiltro}
                   onChange={(e) => { setRecursoFiltro(e.target.value); setPaginaActual(1); }}
                   className="campo-entrada"
-                />
+                >
+                  <option value="">Todos</option>
+                  {Object.entries(RECURSO_ETIQUETA).map(([valor, etiqueta]) => (
+                    <option key={valor} value={valor}>{etiqueta}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-on-surface-variant mt-1">Tipo de registro sobre el que se hizo la acción.</p>
               </div>
               <div className="flex items-end">
                 <label className="flex items-center gap-2 cursor-pointer pb-2">
@@ -290,7 +330,7 @@ export default function PaginaAuditoria() {
 
                 <div className="flex items-center gap-1.5 text-on-surface-variant">
                   <Icono nombre={RECURSO_ICONO[reg.recurso] ?? RECURSO_ICONO.default} clase="text-[14px]" />
-                  <span className="font-medium">{reg.recurso}</span>
+                  <span className="font-medium">{RECURSO_ETIQUETA[reg.recurso] ?? reg.recurso}</span>
                   {reg.recursoId && (
                     <span className="text-outline font-mono text-[10px]">#{reg.recursoId.slice(-6)}</span>
                   )}

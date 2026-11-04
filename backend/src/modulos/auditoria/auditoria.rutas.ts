@@ -20,8 +20,14 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
       usuarioId:  z.string().min(1).optional(),
       accion:     z.nativeEnum(TipoAccionAuditoria).optional(),
       modulo:     z.string().optional(),
-      desde:      z.coerce.date().optional(),
-      hasta:      z.coerce.date().optional(),
+      // Tipo de registro afectado (Animal, HistorialMedico, Reporte...)
+      recurso:    z.string().min(1).optional(),
+      // Texto libre: descripción, recurso o usuario
+      busqueda:   z.string().trim().min(1).optional(),
+      exitoso:    z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+      // Fechas de calendario (AAAA-MM-DD): el día completo, en hora local
+      desde:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      hasta:      z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       pagina:     z.coerce.number().int().positive().default(1),
       porPagina:  z.coerce.number().int().positive().max(100).default(25),
     }).parse(req.query);
@@ -30,10 +36,23 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
       ...(filtros.usuarioId && { usuarioId: filtros.usuarioId }),
       ...(filtros.accion    && { accion: filtros.accion }),
       ...(filtros.modulo    && { modulo: { contains: filtros.modulo, mode: 'insensitive' as const } }),
+      ...(filtros.recurso   && { entidadTipo: filtros.recurso }),
+      ...(filtros.exitoso !== undefined && { exitosa: filtros.exitoso }),
+      ...(filtros.busqueda  && {
+        OR: [
+          { descripcion: { contains: filtros.busqueda, mode: 'insensitive' as const } },
+          { entidadTipo: { contains: filtros.busqueda, mode: 'insensitive' as const } },
+          { usuario: { OR: [
+            { nombre:   { contains: filtros.busqueda, mode: 'insensitive' as const } },
+            { apellido: { contains: filtros.busqueda, mode: 'insensitive' as const } },
+            { correo:   { contains: filtros.busqueda, mode: 'insensitive' as const } },
+          ] } },
+        ],
+      }),
       ...((filtros.desde || filtros.hasta) && {
         creadoEn: {
-          ...(filtros.desde && { gte: filtros.desde }),
-          ...(filtros.hasta && { lte: filtros.hasta }),
+          ...(filtros.desde && { gte: new Date(`${filtros.desde}T00:00:00`) }),
+          ...(filtros.hasta && { lte: new Date(`${filtros.hasta}T23:59:59.999`) }),
         },
       }),
     };
@@ -50,7 +69,16 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
     ]);
 
     const { pagina, porPagina } = calcularPaginacion(filtros.pagina, filtros.porPagina);
-    return respuestaListado(res, registros, construirMeta(total, pagina, porPagina));
+    // Nombres que usa la pantalla de auditoría
+    const datos = registros.map((r) => ({
+      ...r,
+      recurso:   r.entidadTipo ?? r.modulo,
+      recursoId: r.entidadId,
+      ipAddress: r.direccionIP,
+      userAgent: r.agenteUsuario,
+      exitoso:   r.exitosa,
+    }));
+    return respuestaListado(res, datos, construirMeta(total, pagina, porPagina));
   } catch (error) { return next(error); }
 });
 
