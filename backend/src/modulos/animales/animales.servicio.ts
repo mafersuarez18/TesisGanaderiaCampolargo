@@ -1,4 +1,5 @@
 import { Sexo, EstadoAnimal, TipoPropositoAnimal, EstadoSanitario, TipoIdentificacion } from '@prisma/client';
+import { prisma } from '../../compartido/prisma/clientePrisma';
 import {
   listarAnimales,
   obtenerAnimalPorId,
@@ -140,6 +141,37 @@ export async function servicioActualizarAnimal(
   if (datos.numeroIdentificacion && datos.numeroIdentificacion !== animal.numeroIdentificacion) {
     if (await existeAreteRegistrado(datos.numeroIdentificacion, id)) {
       throw new ErrorConflicto(`Ya existe un animal con esa identificación: '${datos.numeroIdentificacion}'`);
+    }
+  }
+
+  // Las mismas reglas de sexo que al crear: el padre es macho y la madre
+  // hembra, y no se puede cambiar el sexo de un animal que ya figura como
+  // padre/madre o que tiene registros reproductivos propios de su sexo.
+  if (datos.padreId) {
+    const padre = await obtenerAnimalPorId(datos.padreId);
+    if (!padre) throw new ErrorValidacionDatos('El padre especificado no existe');
+    if (padre.sexo !== 'MACHO') throw new ErrorValidacionDatos('El padre debe ser de sexo MACHO');
+  }
+  if (datos.madreId) {
+    const madre = await obtenerAnimalPorId(datos.madreId);
+    if (!madre) throw new ErrorValidacionDatos('La madre especificada no existe');
+    if (madre.sexo !== 'HEMBRA') throw new ErrorValidacionDatos('La madre debe ser de sexo HEMBRA');
+  }
+  if (datos.sexo && datos.sexo !== animal.sexo) {
+    const [hijos, gestaciones, eventosDeHembra] = await Promise.all([
+      prisma.animal.count({ where: animal.sexo === 'MACHO' ? { padreId: id } : { madreId: id } }),
+      prisma.gestacion.count({ where: { madreId: id } }),
+      prisma.eventoReproductivo.count({
+        where: {
+          animalId: id,
+          tipo: { in: ['INSEMINACION_ARTIFICIAL', 'MONTA_NATURAL', 'DIAGNOSTICO_GESTACION', 'PARTO', 'ABORTO', 'DETECCION_CELO'] },
+        },
+      }),
+    ]);
+    if (hijos > 0 || gestaciones > 0 || eventosDeHembra > 0) {
+      throw new ErrorValidacionDatos(
+        `No se puede cambiar el sexo: el animal ya tiene ${hijos > 0 ? `crías registradas como ${animal.sexo === 'MACHO' ? 'padre' : 'madre'}` : 'registros reproductivos de hembra'}`,
+      );
     }
   }
 

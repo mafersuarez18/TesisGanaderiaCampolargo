@@ -831,6 +831,9 @@ const TIPOS_FORM = [
 
 const DIAS_GESTACION_BOVINA = 283;
 const TIPOS_INICIAN_GESTACION = new Set(['INSEMINACION_ARTIFICIAL', 'MONTA_NATURAL']);
+// Destete y descarte aplican a ambos sexos; el resto solo a hembras (el
+// backend también lo valida).
+const TIPOS_AMBOS_SEXOS = new Set(['DESTETE', 'DESCARTE_REPRODUCTIVO']);
 
 function sumarDias(fechaStr: string, dias: number): string {
   if (!fechaStr) return '';
@@ -862,7 +865,9 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
     manejoHato: '',
   });
   const [error, setError] = useState('');
+  const [sexoAnimal, setSexoAnimal] = useState<'MACHO' | 'HEMBRA' | null>(null);
 
+  const soloHembras      = !TIPOS_AMBOS_SEXOS.has(form.tipo);
   const esGestacion      = form.tipo === 'GESTACION';
   const esIA             = form.tipo === 'INSEMINACION_ARTIFICIAL';
   const iniciaGestacion  = TIPOS_INICIAN_GESTACION.has(form.tipo);
@@ -990,9 +995,18 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                 etiqueta="Animal"
                 requerido
                 valor={form.animalId}
-                alSeleccionar={(id) => setForm((f) => ({ ...f, animalId: id }))}
-                placeholder="Buscar por identificación o nombre..."
+                alSeleccionar={(id, animal) => {
+                  setSexoAnimal(animal?.sexo ?? null);
+                  setForm((f) => ({ ...f, animalId: id }));
+                }}
+                sexo={soloHembras ? 'HEMBRA' : undefined}
+                placeholder={soloHembras ? 'Buscar hembra por identificación o nombre...' : 'Buscar por identificación o nombre...'}
               />
+              {sexoAnimal === 'MACHO' && (
+                <p className="text-[11px] text-on-surface-variant mt-1">
+                  Es un macho: solo se le pueden registrar destete o descarte reproductivo.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1006,7 +1020,10 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                   className="campo-entrada"
                 >
                   {TIPOS_FORM.map((t) => (
-                    <option key={t.valor} value={t.valor}>{t.etiqueta}</option>
+                    <option key={t.valor} value={t.valor}
+                      disabled={sexoAnimal === 'MACHO' && !TIPOS_AMBOS_SEXOS.has(t.valor)}>
+                      {t.etiqueta}
+                    </option>
                   ))}
                 </select>
               </div>

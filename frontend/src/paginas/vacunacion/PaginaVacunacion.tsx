@@ -31,6 +31,15 @@ interface CalendarioVacunacion {
 type Proposito = 'CARNE' | 'LECHE' | 'CARNE_LECHE' | 'REPRODUCCION' | 'TAUROMAQUIA';
 type Condicion = 'GESTANTES' | 'VACIAS' | 'EN_LACTANCIA' | 'SECAS';
 
+// Sexo al que se restringe un protocolo: el explícito o, si es para
+// gestantes/vacías/en lactancia, hembras (misma regla que el backend).
+function sexoDelCalendario(cal?: CalendarioVacunacion): 'MACHO' | 'HEMBRA' | undefined {
+  if (!cal) return undefined;
+  if (cal.aplicaASexo) return cal.aplicaASexo;
+  if (cal.aplicaACondicion && cal.aplicaACondicion !== 'SECAS') return 'HEMBRA';
+  return undefined;
+}
+
 const ETIQUETA_PROPOSITO: Record<Proposito, string> = {
   CARNE: 'Carne', LECHE: 'Leche', CARNE_LECHE: 'Doble propósito',
   REPRODUCCION: 'Reproducción', TAUROMAQUIA: 'Tauromaquia',
@@ -1432,9 +1441,11 @@ function FormularioRegistro({
     onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'Error al registrar la vacunación'),
   });
 
-  // Advertencia (no bloquea) si el protocolo no le corresponde al animal
-  // según sus categorías: sexo, edad, propósito o condición reproductiva.
-  const { data: aplicabilidad } = useQuery<{ aplica: boolean; motivos: string[] }>({
+  const sexoCalendario = sexoDelCalendario(todosCalendarios.find((c) => c.id === form.calendarioVacunacionId));
+
+  // Si el protocolo no le corresponde al animal: por edad, propósito o
+  // condición solo se advierte; por sexo no se permite registrarlo.
+  const { data: aplicabilidad } = useQuery<{ aplica: boolean; motivos: string[]; sexoNoCorresponde?: boolean }>({
     queryKey: ['vacuna-aplica', form.calendarioVacunacionId, form.animalId],
     queryFn: () => clienteHttp
       .get(`/vacunacion/calendarios/${form.calendarioVacunacionId}/aplica`, { params: { animalId: form.animalId }, silencioso: true })
@@ -1505,10 +1516,21 @@ function FormularioRegistro({
               requerido
               valor={form.animalId}
               alSeleccionar={(id) => setForm((f) => ({ ...f, animalId: id }))}
-              placeholder="Buscar por identificación o nombre..."
+              sexo={sexoCalendario}
+              placeholder={sexoCalendario
+                ? `Buscar ${sexoCalendario === 'HEMBRA' ? 'hembra' : 'macho'} por identificación o nombre...`
+                : 'Buscar por identificación o nombre...'}
             />
 
-            {aplicabilidad && !aplicabilidad.aplica && (
+            {aplicabilidad?.sexoNoCorresponde ? (
+              <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-error-container border border-error/20 text-on-error-container text-xs">
+                <Icono nombre="block" clase="text-[18px] flex-shrink-0 text-error" />
+                <p>
+                  Este protocolo es solo para <strong>{sexoCalendario === 'MACHO' ? 'machos' : 'hembras'}</strong>:
+                  no se puede aplicar a este animal. Elija otro animal o protocolo.
+                </p>
+              </div>
+            ) : aplicabilidad && !aplicabilidad.aplica && (
               <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs">
                 <Icono nombre="warning" clase="text-[18px] flex-shrink-0" />
                 <div>
@@ -1563,7 +1585,7 @@ function FormularioRegistro({
 
             <div className="flex gap-3 pt-2">
               <button type="button" onClick={onCerrar} className="flex-1 boton boton-secundario">Cancelar</button>
-              <button type="submit" disabled={mutacion.isPending} className="flex-1 boton boton-primario">
+              <button type="submit" disabled={mutacion.isPending || !!aplicabilidad?.sexoNoCorresponde} className="flex-1 boton boton-primario">
                 {mutacion.isPending ? 'Guardando...' : 'Registrar'}
               </button>
             </div>

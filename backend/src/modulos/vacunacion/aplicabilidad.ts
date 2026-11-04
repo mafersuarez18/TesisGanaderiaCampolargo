@@ -40,6 +40,19 @@ const ETIQUETA_PROPOSITO: Record<TipoPropositoAnimal, string> = {
   REPRODUCCION: 'reproducción', TAUROMAQUIA: 'tauromaquia',
 };
 
+/**
+ * Sexo al que se restringe el calendario, ya sea explícito (aplicaASexo) o
+ * implícito por la condición reproductiva (gestantes, vacías y en lactancia
+ * son siempre hembras; "secas" incluye machos). A diferencia de la edad o el
+ * propósito, que solo generan una advertencia, aplicar un protocolo a un
+ * animal del otro sexo no se permite.
+ */
+export function sexoRequerido(cal: Pick<CriteriosCalendario, 'aplicaASexo' | 'aplicaACondicion'>): Sexo | null {
+  if (cal.aplicaASexo) return cal.aplicaASexo;
+  if (cal.aplicaACondicion && cal.aplicaACondicion !== 'SECAS') return Sexo.HEMBRA;
+  return null;
+}
+
 /** Razones por las que el calendario no aplica al animal; vacío = aplica. */
 export function motivosNoAplica(cal: CriteriosCalendario, animal: PerfilAnimal, hoy = new Date()): string[] {
   const motivos: string[] = [];

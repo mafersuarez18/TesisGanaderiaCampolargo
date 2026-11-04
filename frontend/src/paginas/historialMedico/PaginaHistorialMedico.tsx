@@ -1665,6 +1665,10 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
   const [despPrecargadas, setDespPrecargadas] = useState<Set<number>>(new Set());
   // Enfermedades activas del animal seleccionado (de consultas anteriores), para vincular tratamientos
   const [enfermedadesActivas, setEnfermedadesActivas] = useState<EnfermedadActivaOpcion[]>([]);
+  // Sexo del animal seleccionado: los litros de leche/día solo se registran
+  // en una hembra cuyo estado reproductivo en la consulta sea "Lactante".
+  const [sexoAnimal, setSexoAnimal] = useState<'MACHO' | 'HEMBRA' | null>(null);
+  const puedeRegistrarLeche = sexoAnimal === 'HEMBRA' && form.estadoReproductivo === 'LACTANTE';
 
   const { data: medicamentos = [] } = useQuery<MedicamentoOpcion[]>({
     queryKey: ['medicamentos-catalogo'],
@@ -1681,7 +1685,8 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
       const { data } = await clienteHttp.get('/historial-medico/prefill', {
         params: { animalId },
       });
-      const { ultimaDesparasitacion, enfermedadesActivas: activas } = data.datos as {
+      const { sexo, ultimaDesparasitacion, enfermedadesActivas: activas } = data.datos as {
+        sexo: 'MACHO' | 'HEMBRA' | null;
         ultimaDesparasitacion: {
           medicamentoId: string; tipo: string;
           fecha: string; dosis?: string; via?: string;
@@ -1690,6 +1695,17 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
       };
 
       setEnfermedadesActivas(activas ?? []);
+      setSexoAnimal(sexo);
+      // Quitar lo que no corresponde al sexo del animal recién elegido
+      if (sexo === 'MACHO') {
+        setForm((f) => ({
+          ...f,
+          litrosLechesDiarios: '',
+          estadoReproductivo: ['LACTANTE', 'GESTANTE'].includes(f.estadoReproductivo) ? '' : f.estadoReproductivo,
+        }));
+      } else if (sexo === 'HEMBRA') {
+        setForm((f) => ({ ...f, estadoReproductivo: f.estadoReproductivo === 'CASTRADO' ? '' : f.estadoReproductivo }));
+      }
 
       if (ultimaDesparasitacion) {
         // Pre-cargar con el último registro — conservar la fecha original
@@ -1719,6 +1735,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
     } catch {
       setForm((f) => ({ ...f, animalId }));
       setEnfermedadesActivas([]);
+      setSexoAnimal(null);
       setDespPrecargadas(new Set());
     }
   };
@@ -1741,7 +1758,7 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
       if (datos.movimientosRuminales)   payload.movimientosRuminales   = parseInt(datos.movimientosRuminales);
       if (datos.condicionCorporal)      payload.condicionCorporal      = parseFloat(datos.condicionCorporal);
       if (datos.estadoReproductivo)     payload.estadoReproductivo     = datos.estadoReproductivo;
-      if (datos.litrosLechesDiarios)    payload.litrosLechesDiarios    = parseFloat(datos.litrosLechesDiarios);
+      if (datos.litrosLechesDiarios && puedeRegistrarLeche) payload.litrosLechesDiarios = parseFloat(datos.litrosLechesDiarios);
       if (datos.gananciaPeso)           payload.gananciaPeso           = parseFloat(datos.gananciaPeso);
       if (datos.diagnosticoDefinitivo)  payload.diagnosticoDefinitivo  = datos.diagnosticoDefinitivo;
       if (datos.resultadosPruebas) payload.resultadosPruebas = datos.resultadosPruebas;
@@ -1921,7 +1938,8 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
                     alSeleccionar={(id) => {
                       setDespPrecargadas(new Set());
                       setEnfermedadesActivas([]);
-                      setForm((f) => ({ ...f, animalId: id, desparasitaciones: [], vitaminas: [] }));
+                      setSexoAnimal(null);
+                      setForm((f) => ({ ...f, animalId: id, desparasitaciones: [], vitaminas: [], litrosLechesDiarios: '' }));
                       if (id) cargarPrefill(id);
                     }}
                     placeholder="Buscar por identificación o nombre..."
@@ -1983,18 +2001,36 @@ function FormularioConsulta({ onCerrar, onExito, animalIdPredeterminado }: Propi
             <SeccionClinica titulo="Estado del Animal" icono="monitor_heart">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <CampoLabel etiqueta="Estado reproductivo">
-                  <select value={form.estadoReproductivo} onChange={(e) => set('estadoReproductivo', e.target.value)} className="campo-entrada">
+                  <select value={form.estadoReproductivo}
+                    onChange={(e) => setForm((f) => ({
+                      ...f,
+                      estadoReproductivo: e.target.value,
+                      // Fuera de lactancia no se registra producción de leche
+                      litrosLechesDiarios: e.target.value === 'LACTANTE' ? f.litrosLechesDiarios : '',
+                    }))}
+                    className="campo-entrada">
                     <option value="">No especificado</option>
                     <option value="ENTERO">Entero/Íntegro</option>
-                    <option value="CASTRADO">Castrado</option>
-                    <option value="LACTANTE">Lactante</option>
-                    <option value="GESTANTE">Gestante</option>
+                    {sexoAnimal !== 'HEMBRA' && <option value="CASTRADO">Castrado</option>}
+                    {sexoAnimal !== 'MACHO' && <option value="LACTANTE">Lactante</option>}
+                    {sexoAnimal !== 'MACHO' && <option value="GESTANTE">Gestante</option>}
                   </select>
                 </CampoLabel>
                 <CampoLabel etiqueta="Litros de leche/día">
-                  <input type="number" step="0.1" value={form.litrosLechesDiarios}
+                  <input type="number" step="0.1" min="0" value={form.litrosLechesDiarios}
                     onChange={(e) => set('litrosLechesDiarios', e.target.value)}
-                    placeholder="Ej: 8.5" className="campo-entrada" />
+                    disabled={!puedeRegistrarLeche}
+                    placeholder={puedeRegistrarLeche ? 'Ej: 8.5' : 'No aplica'}
+                    className="campo-entrada disabled:opacity-60 disabled:cursor-not-allowed" />
+                  {!puedeRegistrarLeche && (
+                    <p className="text-[11px] text-on-surface-variant mt-1">
+                      {sexoAnimal === 'MACHO'
+                        ? 'No aplica: el animal es macho.'
+                        : sexoAnimal === 'HEMBRA'
+                          ? 'Seleccione el estado reproductivo "Lactante" para registrarlo.'
+                          : 'Seleccione una hembra en estado "Lactante" para registrarlo.'}
+                    </p>
+                  )}
                 </CampoLabel>
                 <CampoLabel etiqueta="Ganancia de peso (kg)">
                   <input type="number" step="0.1" value={form.gananciaPeso}

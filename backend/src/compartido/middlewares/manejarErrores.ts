@@ -31,9 +31,12 @@ export function manejarErrores(
   // Errores de validación propios del dominio (no relacionados con la
   // forma del body, sino con reglas de negocio)
   if (error instanceof ErrorValidacionDatos) {
+    // Con un único motivo general (lo habitual en reglas de negocio), ese
+    // motivo es el mensaje: es lo que muestran los formularios.
+    const unico = error.errores.length === 1 && error.errores[0]!.campo === 'general';
     res.status(422).json({
       exito: false,
-      mensaje: error.message,
+      mensaje: unico ? error.errores[0]!.mensaje : error.message,
       errores: error.errores,
     });
     return;

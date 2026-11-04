@@ -1,6 +1,6 @@
 import { Prisma, EstadoSanitario, EstadoReproductivo, TipoDesparasitante, NivelGravedad, TipoPruebaComplementaria } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { ErrorNoEncontrado, ErrorConflicto } from '../../compartido/tipos/respuesta';
+import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
 /**
  * Recalcula Animal.estadoSanitario a partir de lo que sigue activo/en curso
@@ -46,7 +46,9 @@ async function recalcularEstadoSanitarioAnimal(animalId: string): Promise<Estado
  *   - calendarios de vacunación activos para saber si hay uno de "desparasitación"
  */
 export async function obtenerPrefillConsulta(animalId: string) {
-  const [ultimaDesparasitacion, calendarios, enfermedadesActivas] = await Promise.all([
+  const [animal, ultimaDesparasitacion, calendarios, enfermedadesActivas] = await Promise.all([
+    // Sexo del animal: el formulario solo habilita "litros de leche/día" en hembras lactantes
+    prisma.animal.findUnique({ where: { id: animalId }, select: { sexo: true } }),
     // Última desparasitación del animal
     prisma.programaDesparasitacion.findFirst({
       where: { animalId },
@@ -66,7 +68,7 @@ export async function obtenerPrefillConsulta(animalId: string) {
     }),
   ]);
 
-  return { ultimaDesparasitacion, calendarios, enfermedadesActivas };
+  return { sexo: animal?.sexo ?? null, ultimaDesparasitacion, calendarios, enfermedadesActivas };
 }
 
 export interface FiltrosHistorial {
@@ -252,9 +254,27 @@ export interface DatosCrearHistorial {
 export async function crearHistorialMedico(datos: DatosCrearHistorial) {
   const animal = await prisma.animal.findUnique({
     where: { id: datos.animalId },
-    select: { id: true },
+    select: { id: true, sexo: true },
   });
   if (!animal) throw new ErrorNoEncontrado(`Animal con id '${datos.animalId}' no encontrado`);
+
+  // La producción de leche solo tiene sentido en una hembra lactante.
+  if (datos.litrosLechesDiarios != null) {
+    if (animal.sexo !== 'HEMBRA') {
+      throw new ErrorValidacionDatos('Los litros de leche/día solo se registran en hembras');
+    }
+    if (datos.estadoReproductivo !== EstadoReproductivo.LACTANTE) {
+      throw new ErrorValidacionDatos('Los litros de leche/día solo se registran si la hembra está lactante');
+    }
+  }
+  if (animal.sexo === 'MACHO' && (
+    datos.estadoReproductivo === EstadoReproductivo.LACTANTE || datos.estadoReproductivo === EstadoReproductivo.GESTANTE
+  )) {
+    throw new ErrorValidacionDatos('Un macho no puede estar lactante ni gestante');
+  }
+  if (animal.sexo === 'HEMBRA' && datos.estadoReproductivo === EstadoReproductivo.CASTRADO) {
+    throw new ErrorValidacionDatos('El estado "Castrado" solo aplica a machos');
+  }
 
   const {
     enfermedades, tratamientos, veterinarioId, animalId, actualizarEstadoSanitario,

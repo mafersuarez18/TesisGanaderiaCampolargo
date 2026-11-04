@@ -7,7 +7,7 @@ import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 import { respuestaExito, respuestaCreado, respuestaListado } from '../../compartido/utilidades/respuestaHttp';
 import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/paginacion';
-import { ErrorNoEncontrado, ErrorConflicto } from '../../compartido/tipos/respuesta';
+import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
 const enrutador = Router();
 
@@ -188,6 +188,16 @@ enrutador.post('/', requerirPrivilegio('inseminacion.crear'), registrarAuditoria
       // Manejo del hato
       manejoHato:          z.nativeEnum(NivelEstres).optional(),
     }).parse(req.body);
+
+    // Solo una hembra puede ser receptora
+    const receptora = await prisma.animal.findUnique({
+      where: { id: datos.receptoraId },
+      select: { sexo: true, numeroIdentificacion: true },
+    });
+    if (!receptora) throw new ErrorNoEncontrado('Animal receptor');
+    if (receptora.sexo !== 'HEMBRA') {
+      throw new ErrorValidacionDatos(`La receptora debe ser una hembra. El animal ${receptora.numeroIdentificacion} es macho.`);
+    }
 
     // Validar inventario disponible
     const inventario = await prisma.inventarioSemen.findUnique({

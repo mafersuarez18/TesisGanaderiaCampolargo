@@ -10,6 +10,7 @@ export interface AnimalResumen {
   id: string;
   numeroIdentificacion: string;
   nombre: string | null;
+  sexo?: 'MACHO' | 'HEMBRA';
 }
 
 interface PropsBuscadorAnimal {
@@ -20,6 +21,8 @@ interface PropsBuscadorAnimal {
   placeholder?: string;
   error?: string;
   disabled?: boolean;
+  // Limita la búsqueda a un sexo (p. ej. solo hembras para un parto)
+  sexo?: 'MACHO' | 'HEMBRA';
 }
 
 export default function BuscadorAnimal({
@@ -30,6 +33,7 @@ export default function BuscadorAnimal({
   placeholder = 'Buscar por identificación o nombre...',
   error,
   disabled,
+  sexo,
 }: PropsBuscadorAnimal) {
   const [termino, setTermino] = useState('');
   const [abierto, setAbierto] = useState(false);
@@ -45,11 +49,11 @@ export default function BuscadorAnimal({
   }, [valor]);
 
   const { data: resultados = [], isFetching } = useQuery<AnimalResumen[]>({
-    queryKey: ['animales-busqueda', termino],
+    queryKey: ['animales-busqueda', termino, sexo],
     queryFn: () =>
       clienteHttp
         .get('/animales', {
-          params: { busqueda: termino, porPagina: 8, estado: 'ACTIVO' },
+          params: { busqueda: termino, porPagina: 8, estado: 'ACTIVO', ...(sexo && { sexo }) },
         })
         .then((r) => r.data.datos ?? []),
     enabled: termino.length >= 1,
@@ -137,7 +141,7 @@ export default function BuscadorAnimal({
               </div>
             ) : !resultados.length ? (
               <div className="px-4 py-3 text-xs text-on-surface-variant">
-                Sin resultados para "{termino}"
+                Sin resultados para "{termino}"{sexo && (sexo === 'HEMBRA' ? ' entre las hembras' : ' entre los machos')}
               </div>
             ) : (
               resultados.map((animal) => (

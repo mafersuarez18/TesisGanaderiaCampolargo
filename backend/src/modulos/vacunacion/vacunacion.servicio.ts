@@ -1,8 +1,8 @@
 import { Prisma, Sexo, EstadoAnimal, TipoPropositoAnimal, CondicionReproductivaVacuna } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { ErrorNoEncontrado, ErrorConflicto } from '../../compartido/tipos/respuesta';
+import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 import { resolverNotificacionesDeEntidad } from '../notificaciones/notificaciones.servicio';
-import { motivosNoAplica, cargarEstadoReproductivo, SELECCION_CRITERIOS } from './aplicabilidad';
+import { motivosNoAplica, cargarEstadoReproductivo, sexoRequerido, SELECCION_CRITERIOS } from './aplicabilidad';
 
 // Al registrar una vacunación se calcula automáticamente proximaFecha
 // (fecha + intervaloDias del calendario), que es lo que luego usa el motor
@@ -162,18 +162,28 @@ export async function verificarAplicabilidad(calendarioId: string, animalId: str
     gestante: gestantes.has(animal.id),
     ultimoParto: ultimoParto.get(animal.id) ?? null,
   });
-  return { aplica: motivos.length === 0, motivos };
+  const sexo = sexoRequerido(calendario);
+  return { aplica: motivos.length === 0, motivos, sexoNoCorresponde: !!sexo && sexo !== animal.sexo };
 }
 
 export async function registrarVacunacion(datos: DatosRegistroVacunacion) {
   const calendario = await prisma.calendarioVacunacion.findUnique({
     where: { id: datos.calendarioVacunacionId },
-    select: { id: true, intervaloDias: true },
+    select: { id: true, intervaloDias: true, nombreVacuna: true, aplicaASexo: true, aplicaACondicion: true },
   });
   if (!calendario) throw new ErrorNoEncontrado('Calendario de vacunación no encontrado');
 
-  const animal = await prisma.animal.findUnique({ where: { id: datos.animalId }, select: { id: true } });
+  const animal = await prisma.animal.findUnique({ where: { id: datos.animalId }, select: { id: true, sexo: true } });
   if (!animal) throw new ErrorNoEncontrado('Animal no encontrado');
+
+  // Un protocolo exclusivo de un sexo no se aplica al otro (las demás
+  // categorías —edad, propósito— solo advierten en el formulario).
+  const sexo = sexoRequerido(calendario);
+  if (sexo && sexo !== animal.sexo) {
+    throw new ErrorValidacionDatos(
+      `El protocolo "${calendario.nombreVacuna}" es solo para ${sexo === 'HEMBRA' ? 'hembras' : 'machos'}`,
+    );
+  }
 
   // Calcular próxima fecha de aplicación sugerida
   const proximaFecha = new Date(
