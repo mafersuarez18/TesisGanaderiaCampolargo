@@ -12,8 +12,9 @@ import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/re
 import toast from 'react-hot-toast';
 
 // Panel de notificaciones generadas por el motor de alertas: resumen por
-// prioridad/tipo y el listado completo, con acciones para leer/abordar
-// (abordar = resolver manualmente, saca la alerta del conteo pendiente).
+// prioridad/tipo y el listado completo, con acciones para leer/atender
+// (atender = resolverla: se cierra para todos sus destinatarios y queda
+// registrado quién la atendió; "leída" es solo personal).
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ interface Notificacion {
   leida: boolean;
   fechaLeida?: string;
   creadoEn: string;
+  /** Quién la atendió (con "Atender" o con la acción que la resolvió). */
+  atendidaPor?: { nombre: string; apellido: string } | null;
 }
 
 interface ResumenAlertas {
@@ -100,7 +103,7 @@ const ETIQUETA_TIPO_ALERTA: Record<string, string> = {
   ENFERMEDAD_ACTIVA_SIN_RESOLUCION:     'Enfermedad activa',
   INVENTARIO_SEMEN_BAJO:                'Inventario semen',
   CONTROL_PESO_PENDIENTE:               'Control de peso',
-  PERSONALIZADA:                        'Personalizada',
+  PERSONALIZADA:                        'Recordatorio programado',
 };
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -111,6 +114,8 @@ export default function PaginaAlertas() {
   const queryClient = useQueryClient();
   const [pestaña, setPestaña]             = useState<'notificaciones' | 'reglas'>('notificaciones');
   const [soloNoLeidas, setSoloNoLeidas]   = useState(false);
+  // Historial de alertas ya atendidas (por cualquiera de sus destinatarios)
+  const [verAtendidas, setVerAtendidas]   = useState(false);
   const [paginaActual, setPaginaActual]   = useState(1);
   const [prioridadFiltro, setPrioridadFiltro] = useState<string>('');
   const [tipoFiltro, setTipoFiltro]       = useState<string>('');
@@ -131,13 +136,13 @@ export default function PaginaAlertas() {
   });
 
   const { data, isLoading } = useQuery<RespuestaNotificaciones>({
-    queryKey: ['notificaciones', paginaActual, soloNoLeidas, prioridadFiltro, tipoFiltro],
+    queryKey: ['notificaciones', paginaActual, soloNoLeidas, verAtendidas, prioridadFiltro, tipoFiltro],
     queryFn: () =>
       clienteHttp.get('/notificaciones', {
         params: {
           pagina: paginaActual,
           porPagina: 20,
-          ...(soloNoLeidas         && { noLeidas:  true }),
+          ...(verAtendidas         ? { atendidas: true } : soloNoLeidas && { noLeidas: true }),
           ...(prioridadFiltro      && { prioridad: prioridadFiltro }),
         },
       }).then((r) => r.data),
@@ -170,9 +175,9 @@ export default function PaginaAlertas() {
       queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
       queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
       queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
-      toast.success('Alerta marcada como abordada');
+      toast.success('Alerta atendida: se cerró para todos sus destinatarios');
     },
-    onError: () => toast.error('Error al abordar la alerta'),
+    onError: () => toast.error('Error al atender la alerta'),
   });
 
   const mutFinalizarTratamiento = useMutation({
@@ -195,9 +200,9 @@ export default function PaginaAlertas() {
       queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
       queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
       queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
-      toast.success('Todas las alertas marcadas como abordadas');
+      toast.success('Alertas atendidas: se cerraron para todos sus destinatarios');
     },
-    onError: () => toast.error('Error al abordar las alertas'),
+    onError: () => toast.error('Error al atender las alertas'),
   });
 
   const mutMarcarTodas = useMutation({
@@ -312,10 +317,10 @@ export default function PaginaAlertas() {
               onClick={() => mutAbordarTodas.mutate()}
               disabled={mutAbordarTodas.isPending}
               className="boton boton-secundario gap-2 text-sm"
-              title="Marca todas como abordadas: desaparecen del panel hasta que el motor las regenere"
+              title="Atiende todas tus alertas pendientes: se cierran también para los demás destinatarios"
             >
               <Icono nombre="done_all" clase="text-[18px]" />
-              Abordar todas
+              Atender todas
             </button>
           )}
         </div>
@@ -419,15 +424,28 @@ export default function PaginaAlertas() {
           <div className="flex flex-wrap gap-2 items-center">
             {/* Solo no leídas */}
             <button
-              onClick={() => { setSoloNoLeidas(!soloNoLeidas); setPaginaActual(1); }}
+              onClick={() => { setSoloNoLeidas(!soloNoLeidas); setVerAtendidas(false); setPaginaActual(1); }}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                soloNoLeidas
+                soloNoLeidas && !verAtendidas
                   ? 'bg-primary-container text-on-primary-container ring-1 ring-primary/30'
                   : 'text-on-surface-variant hover:bg-surface-container'
               }`}
             >
               <Icono nombre="mark_email_unread" clase="text-[14px]" />
               Solo no leídas
+            </button>
+
+            {/* Historial: alertas ya atendidas, con quién y cuándo */}
+            <button
+              onClick={() => { setVerAtendidas(!verAtendidas); setPaginaActual(1); }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                verAtendidas
+                  ? 'bg-primary-container text-on-primary-container ring-1 ring-primary/30'
+                  : 'text-on-surface-variant hover:bg-surface-container'
+              }`}
+            >
+              <Icono nombre="task_alt" clase="text-[14px]" />
+              Atendidas
             </button>
 
             {/* Filtro prioridad */}
@@ -479,9 +497,12 @@ export default function PaginaAlertas() {
               <div className="w-16 h-16 rounded-full bg-surface-container mx-auto mb-4 flex items-center justify-center">
                 <Icono nombre="notifications_off" clase="text-[32px] text-outline" />
               </div>
-              <p className="font-medium text-on-surface-variant text-lg">Sin alertas pendientes</p>
+              <p className="font-medium text-on-surface-variant text-lg">
+                {verAtendidas ? 'Aún no hay alertas atendidas' : 'Sin alertas pendientes'}
+              </p>
               <p className="text-sm text-outline mt-1">
-                {soloNoLeidas ? 'No hay notificaciones sin leer' : 'El motor aún no ha generado alertas'}
+                {verAtendidas ? 'Aquí aparecerán las alertas resueltas, con quién y cuándo las atendió'
+                  : soloNoLeidas ? 'No hay notificaciones sin leer' : 'El motor aún no ha generado alertas'}
               </p>
               {puedeAdministrar && (
                 <button
@@ -535,6 +556,17 @@ export default function PaginaAlertas() {
                                 {ETIQUETA_TIPO[notif.entidadTipo] ?? notif.entidadTipo}
                               </span>
                             </div>
+                          )}
+                          {notif.estado === 'DESCARTADA' && (
+                            <p className="flex items-center gap-1 mt-1.5 text-[11px] text-primary">
+                              <Icono nombre="task_alt" clase="text-[13px]" />
+                              {notif.atendidaPor
+                                ? `Atendida por ${notif.atendidaPor.nombre} ${notif.atendidaPor.apellido}`
+                                : 'Resuelta'}
+                              {notif.fechaLeida && ` el ${new Date(notif.fechaLeida).toLocaleString('es-VE', {
+                                day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                              })}`}
+                            </p>
                           )}
                           {notif.entidadTipo === 'Tratamiento' && !notif.leida && notif.entidadId && (
                             <div className="flex items-center gap-2 mt-2.5">
@@ -595,15 +627,18 @@ export default function PaginaAlertas() {
 
                     {/* Acciones */}
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      {/* Abordar: la alerta desaparece del panel hasta que el motor la regenere */}
-                      <button
-                        onClick={() => mutAbordar.mutate(notif.id)}
-                        disabled={mutAbordar.isPending}
-                        title="Abordar — la alerta desaparece del panel y la campanita hasta que el sistema la regenere"
-                        className="p-1.5 text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                      >
-                        <Icono nombre="check_circle" clase="text-[16px]" />
-                      </button>
+                      {/* Atender: la alerta se cierra para todos sus destinatarios */}
+                      {notif.estado !== 'DESCARTADA' && (
+                        <button
+                          onClick={() => mutAbordar.mutate(notif.id)}
+                          disabled={mutAbordar.isPending}
+                          title="Atender — se cierra para todos los que la recibieron y queda registrado que la atendiste"
+                          className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                        >
+                          <Icono nombre="check_circle" clase="text-[16px]" />
+                          Atender
+                        </button>
+                      )}
                       <button
                         onClick={() => mutEliminar.mutate(notif.id)}
                         disabled={mutEliminar.isPending}
@@ -796,7 +831,9 @@ function TarjetaRegla({
           {regla.umbralValor != null && (
             <span className="flex items-center gap-1">
               <Icono nombre="schedule" clase="text-[12px]" />
-              Umbral: <strong className="text-on-surface-variant">{regla.umbralValor} {regla.umbralUnidad ?? 'días'}</strong>
+              {regla.tipoAlerta === 'PERSONALIZADA'
+                ? <>Se repite cada <strong className="text-on-surface-variant">{regla.umbralValor} días</strong></>
+                : <>Umbral: <strong className="text-on-surface-variant">{regla.umbralValor} {regla.umbralUnidad ?? 'días'}</strong></>}
             </span>
           )}
           <span className="flex items-center gap-1">
@@ -870,17 +907,17 @@ interface FormRegla {
 }
 
 // Descripción contextual y variables disponibles por tipo de alerta
-const INFO_TIPO: Record<string, { ayuda: string; umbralLabel: string; umbralDefault: string; variables: string }> = {
-  VACUNA_VENCIDA:                    { ayuda: 'Se dispara cuando la próxima fecha de una vacuna ya pasó.', umbralLabel: 'Días de gracia tras vencimiento', umbralDefault: '0', variables: '{animal}, {vacuna}, {fecha}' },
-  VACUNA_PROXIMA:                    { ayuda: 'Avisa X días antes de que venza la próxima aplicación.', umbralLabel: 'Días de anticipación', umbralDefault: '7', variables: '{animal}, {vacuna}, {fecha}, {dias}' },
-  PARTO_PROXIMO:                     { ayuda: 'Avisa cuando un parto esperado está a X días o menos.', umbralLabel: 'Días antes del parto', umbralDefault: '7', variables: '{animal}, {dias}, {fecha}' },
-  DIAS_ABIERTOS_EXCEDIDOS:           { ayuda: 'Alerta cuando una vaca lleva más de X días sin nueva gestación desde el último parto.', umbralLabel: 'Días abiertos máximos', umbralDefault: '90', variables: '{animal}, {dias}' },
-  INTERVALO_REPRODUCTIVO_PROLONGADO: { ayuda: 'Avisa cuando el intervalo entre partos supera X días.', umbralLabel: 'Días máximos entre partos', umbralDefault: '365', variables: '{animal}, {dias}' },
-  AUSENCIA_CONTROL_VETERINARIO:      { ayuda: 'Alerta cuando un animal no ha tenido consulta veterinaria en más de X días.', umbralLabel: 'Días sin control', umbralDefault: '60', variables: '{animal}, {dias}' },
-  ENFERMEDAD_ACTIVA_SIN_RESOLUCION:  { ayuda: 'Avisa cuando una enfermedad activa lleva más de X días sin resolverse.', umbralLabel: 'Días con enfermedad activa', umbralDefault: '14', variables: '{animal}, {enfermedad}, {dias}' },
-  INVENTARIO_SEMEN_BAJO:             { ayuda: 'Alerta cuando el inventario de semen de un semental cae por debajo de X dosis.', umbralLabel: 'Mínimo de dosis', umbralDefault: '10', variables: '{semental}, {cantidad}, {umbral}' },
-  CONTROL_PESO_PENDIENTE:            { ayuda: 'Avisa sobre animales sin peso registrado que llevan más de X días en el sistema.', umbralLabel: 'Días desde el ingreso', umbralDefault: '30', variables: '{animal}, {dias}' },
-  PERSONALIZADA:                     { ayuda: 'Regla de referencia o recordatorio personalizado sin lógica automática.', umbralLabel: 'Valor de referencia', umbralDefault: '', variables: 'Sin variables automáticas' },
+const INFO_TIPO: Record<string, { ayuda: string; umbralLabel: string; umbralDefault: string; variables: string; umbralAyuda?: string }> = {
+  VACUNA_VENCIDA:                    { ayuda: 'Se dispara cuando la próxima fecha de una vacuna ya pasó.', umbralLabel: 'Días de gracia tras vencimiento', umbralDefault: '0', variables: '{animal}, {vacuna}, {fecha}', umbralAyuda: 'Días que se esperan después de la fecha de vencimiento antes de avisar. Con 0 avisa el mismo día en que vence.' },
+  VACUNA_PROXIMA:                    { ayuda: 'Avisa X días antes de que venza la próxima aplicación.', umbralLabel: 'Días de anticipación', umbralDefault: '7', variables: '{animal}, {vacuna}, {fecha}, {dias}', umbralAyuda: 'Cuántos días antes del vencimiento empieza a avisar. Con 7, avisa toda vacuna que vence en la próxima semana.' },
+  PARTO_PROXIMO:                     { ayuda: 'Avisa cuando un parto esperado está a X días o menos.', umbralLabel: 'Días antes del parto', umbralDefault: '7', variables: '{animal}, {dias}, {fecha}', umbralAyuda: 'Cuántos días antes de la fecha probable de parto empieza a avisar.' },
+  DIAS_ABIERTOS_EXCEDIDOS:           { ayuda: 'Alerta cuando una vaca lleva más de X días sin nueva gestación desde el último parto.', umbralLabel: 'Días abiertos máximos', umbralDefault: '90', variables: '{animal}, {dias}', umbralAyuda: 'Días máximos aceptables entre el parto y la nueva preñez. Lo habitual es 80–120.' },
+  INTERVALO_REPRODUCTIVO_PROLONGADO: { ayuda: 'Avisa cuando el intervalo entre partos supera X días.', umbralLabel: 'Días máximos entre partos', umbralDefault: '365', variables: '{animal}, {dias}', umbralAyuda: 'Días máximos aceptables entre dos partos seguidos. La meta habitual es un parto por año (365).' },
+  AUSENCIA_CONTROL_VETERINARIO:      { ayuda: 'Alerta cuando un animal no ha tenido consulta veterinaria en más de X días.', umbralLabel: 'Días sin control', umbralDefault: '60', variables: '{animal}, {dias}', umbralAyuda: 'Días sin ninguna consulta registrada a partir de los cuales el animal se considera sin control.' },
+  ENFERMEDAD_ACTIVA_SIN_RESOLUCION:  { ayuda: 'Avisa cuando una enfermedad activa lleva más de X días sin resolverse.', umbralLabel: 'Días con enfermedad activa', umbralDefault: '14', variables: '{animal}, {enfermedad}, {dias}', umbralAyuda: 'Días que puede seguir activa una enfermedad antes de avisar que no se ha resuelto.' },
+  INVENTARIO_SEMEN_BAJO:             { ayuda: 'Alerta cuando el inventario de semen de un semental cae por debajo de X dosis.', umbralLabel: 'Mínimo de dosis', umbralDefault: '10', variables: '{semental}, {cantidad}, {umbral}', umbralAyuda: 'Cantidad mínima de dosis disponibles por lote de semen; por debajo de ese número se avisa.' },
+  CONTROL_PESO_PENDIENTE:            { ayuda: 'Avisa sobre animales sin peso registrado que llevan más de X días en el sistema.', umbralLabel: 'Días desde el ingreso', umbralDefault: '30', variables: '{animal}, {dias}', umbralAyuda: 'Días desde el ingreso del animal sin ningún peso registrado a partir de los cuales se avisa.' },
+  PERSONALIZADA:                     { ayuda: 'Recordatorio que se repite cada cierto número de días, para tareas de manejo que no dependen de un dato del sistema (baño garrapaticida, pesaje, revisión de cercas...). Llega al crear la regla y luego cada N días.', umbralLabel: 'Repetir cada (días)', umbralDefault: '30', variables: 'Sin variables automáticas', umbralAyuda: 'Cada cuántos días llega el recordatorio, contando desde el último enviado.' },
 };
 
 const TIPOS_ALERTA = [
@@ -893,8 +930,20 @@ const TIPOS_ALERTA = [
   { val: 'ENFERMEDAD_ACTIVA_SIN_RESOLUCION',  et: 'Enfermedad activa sin resolución' },
   { val: 'INVENTARIO_SEMEN_BAJO',             et: 'Inventario de semen bajo' },
   { val: 'CONTROL_PESO_PENDIENTE',            et: 'Control de peso pendiente' },
-  { val: 'PERSONALIZADA',                     et: 'Personalizada' },
+  { val: 'PERSONALIZADA',                     et: 'Recordatorio programado' },
 ];
+
+// Texto de ayuda bajo un campo del formulario de regla
+function Ayuda({ children }: { children: React.ReactNode }) {
+  return <p className="mt-1 text-[11px] text-on-surface-variant">{children}</p>;
+}
+
+const AYUDA_PRIORIDAD: Record<string, string> = {
+  BAJA: 'Informativa: se revisa cuando haya tiempo.',
+  MEDIA: 'Conviene atenderla en los próximos días.',
+  ALTA: 'Requiere atención pronto.',
+  CRITICA: 'Urgente: afecta la salud del animal o el cumplimiento sanitario.',
+};
 
 function ModalRegla({
   regla, onCerrar, onExito,
@@ -934,6 +983,7 @@ function ModalRegla({
   };
 
   const infoTipo = INFO_TIPO[form.tipoAlerta] ?? INFO_TIPO.PERSONALIZADA;
+  const esRecordatorio = form.tipoAlerta === 'PERSONALIZADA';
 
   // Al cambiar tipo, sugerir umbral por defecto si está vacío
   const alCambiarTipo = (tipo: string) => {
@@ -941,7 +991,8 @@ function ModalRegla({
     setForm((f) => ({
       ...f,
       tipoAlerta: tipo,
-      umbralValor: f.umbralValor === '' ? info.umbralDefault : f.umbralValor,
+      // Un recordatorio suele repetirse cada mes: se propone 30 días
+      umbralValor: f.umbralValor === '' || tipo === 'PERSONALIZADA' ? info.umbralDefault : f.umbralValor,
     }));
   };
 
@@ -1018,6 +1069,9 @@ function ModalRegla({
               e.preventDefault();
               if (!form.nombre.trim()) { setError('El nombre es requerido'); return; }
               if (!form.tipoAlerta)    { setError('Selecciona un tipo de alerta'); return; }
+              if (form.tipoAlerta === 'PERSONALIZADA' && !(Number(form.umbralValor) >= 1)) {
+                setError('Indica cada cuántos días se repite el recordatorio (1 o más)'); return;
+              }
               setError('');
               mutacion.mutate(form);
             }}
@@ -1042,6 +1096,7 @@ function ModalRegla({
                 placeholder="Ej: Vacuna próxima — Fiebre Aftosa"
                 className="campo-entrada"
               />
+              <Ayuda>Nombre con el que verás la regla en la lista. Es el título de cada alerta que genere.</Ayuda>
             </div>
 
             {/* ── Tipo de alerta ── */}
@@ -1063,6 +1118,7 @@ function ModalRegla({
                 <Icono nombre="help" clase="text-[14px] text-primary flex-shrink-0 mt-0.5" />
                 <p className="text-[11px] text-on-surface-variant">{infoTipo.ayuda}</p>
               </div>
+              <Ayuda>Qué situación vigila la regla. Cada tipo revisa datos distintos del sistema.</Ayuda>
             </div>
 
             {/* ── Prioridad ── */}
@@ -1090,6 +1146,10 @@ function ModalRegla({
                   );
                 })}
               </div>
+              <Ayuda>
+                Importancia con la que aparecen las alertas (color y orden en la bandeja).{' '}
+                <strong className="text-on-surface">{AYUDA_PRIORIDAD[form.prioridad]}</strong>
+              </Ayuda>
             </div>
 
             {/* ── Umbral ── */}
@@ -1106,6 +1166,7 @@ function ModalRegla({
                   placeholder={infoTipo.umbralDefault || '—'}
                   className="campo-entrada"
                 />
+                {infoTipo.umbralAyuda && <Ayuda>{infoTipo.umbralAyuda}</Ayuda>}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
@@ -1118,6 +1179,7 @@ function ModalRegla({
                   placeholder="días"
                   className="campo-entrada"
                 />
+                <Ayuda>En qué se mide el valor de al lado (días, dosis...). Solo se muestra en el texto de la alerta.</Ayuda>
               </div>
             </div>
 
@@ -1136,28 +1198,41 @@ function ModalRegla({
                 placeholder="24"
                 className="campo-entrada"
               />
-              <p className="mt-1 text-[11px] text-outline">
-                Mínimo 1h · Máximo 720h (30 días). Por defecto: 24h.
-              </p>
+              <Ayuda>
+                Cada cuánto el sistema revisa los datos para ver si hay algo que avisar. Mínimo 1 h, máximo 720 h (30 días);
+                por defecto 24 h (una vez al día).
+              </Ayuda>
             </div>
 
             {/* ── Descripción ── */}
             <div>
               <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                Descripción interna <span className="font-normal text-outline">(opcional)</span>
+                {esRecordatorio
+                  ? <>Texto del recordatorio <span className="font-normal text-outline">(opcional)</span></>
+                  : <>Descripción interna <span className="font-normal text-outline">(opcional)</span></>}
               </label>
               <input
                 type="text"
                 value={form.descripcion}
                 onChange={(e) => setForm((f) => ({ ...f, descripcion: e.target.value }))}
-                placeholder="Descripción interna de para qué sirve esta regla"
+                placeholder={esRecordatorio
+                  ? 'Ej: Aplicar baño garrapaticida al Lote A - Reproductoras'
+                  : 'Descripción interna de para qué sirve esta regla'}
                 className="campo-entrada"
               />
+              <Ayuda>
+                {esRecordatorio
+                  ? 'Mensaje que reciben los destinatarios en cada recordatorio. Si se deja vacío, se usa el nombre de la regla.'
+                  : 'Nota para los administradores; no se incluye en las alertas.'}
+              </Ayuda>
             </div>
 
             {/* ── Destinatarios ── */}
             <div>
-              <p className="text-xs font-semibold text-on-surface-variant mb-2.5">Destinatarios</p>
+              <p className="text-xs font-semibold text-on-surface-variant mb-1">Destinatarios</p>
+              <p className="text-[11px] text-on-surface-variant mb-2.5">
+                Usuarios que reciben las alertas de esta regla en su bandeja (campana de notificaciones).
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
                 {usuariosDisponibles.map((usuario) => (
                   <label key={usuario.id} className="flex items-center gap-2 cursor-pointer select-none">
@@ -1177,6 +1252,7 @@ function ModalRegla({
               </div>
               <div className="mt-2">
                 {check('Enviar correo', 'enviarCorreo', 'email')}
+                <Ayuda>Además de la bandeja, envía cada alerta por correo electrónico a los destinatarios marcados.</Ayuda>
               </div>
             </div>
 

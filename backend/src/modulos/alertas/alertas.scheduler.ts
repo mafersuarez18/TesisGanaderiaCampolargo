@@ -105,7 +105,9 @@ export async function evaluarTodasLasReglas(
         case TipoAlertaRegla.INTERVALO_REPRODUCTIVO_PROLONGADO:
           await evaluarIntervaloParto(umbral, prioridad, regla);
           break;
-        // PERSONALIZADA: no tiene lógica automática, solo se puede disparar manualmente
+        case TipoAlertaRegla.PERSONALIZADA:
+          await evaluarRecordatorio(umbral, prioridad, regla, regla.descripcion);
+          break;
         default:
           break;
       }
@@ -139,6 +141,7 @@ function defaultUmbral(tipo: TipoAlertaRegla): number {
     case TipoAlertaRegla.AUSENCIA_CONTROL_VETERINARIO:      return 60;
     case TipoAlertaRegla.CONTROL_PESO_PENDIENTE:            return 30;
     case TipoAlertaRegla.INTERVALO_REPRODUCTIVO_PROLONGADO: return 365;
+    case TipoAlertaRegla.PERSONALIZADA:                     return 30;
     default:                                                 return 7;
   }
 }
@@ -616,6 +619,40 @@ async function evaluarIntervaloParto(
 }
 
 /** Inventario de semen por debajo del umbral */
+/**
+ * Regla personalizada = recordatorio programado: tareas de manejo que se
+ * repiten (baño garrapaticida, pesaje, revisión de cercas...) y no dependen
+ * de un dato del sistema. Avisa al crear la regla y luego cada `cadaDias`
+ * días, contando desde el último recordatorio enviado. El texto es la
+ * descripción de la regla (o su nombre si no tiene).
+ */
+async function evaluarRecordatorio(
+  cadaDias: number,
+  prioridad: PrioridadAlerta,
+  regla: ReglaDb,
+  texto: string | null,
+): Promise<void> {
+  const ultimo = await prisma.notificacion.findFirst({
+    where: { reglaUsuario: { reglaAlertaId: regla.id } },
+    orderBy: { creadoEn: 'desc' },
+    select: { creadoEn: true },
+  });
+  // Una hora de margen: el motor corre cada hora, y sin margen un
+  // recordatorio diario se correría una hora más tarde cada día.
+  const intervaloMs = Math.max(1, cadaDias) * 24 * 3_600_000 - 3_600_000;
+  if (ultimo && Date.now() - ultimo.creadoEn.getTime() < intervaloMs) return;
+
+  await crearNotificacionSiNoExiste(
+    `Recordatorio — ${regla.nombre}`,
+    texto?.trim() || regla.nombre,
+    prioridad,
+    'ReglaAlerta',
+    regla.id,
+    null,
+    regla,
+  );
+}
+
 async function evaluarInventarioSemen(
   umbralUnidades: number,
   prioridad: PrioridadAlerta,

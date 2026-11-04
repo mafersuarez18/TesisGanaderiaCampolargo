@@ -17,6 +17,8 @@ function perteneceAUsuario(usuarioId: string): Prisma.NotificacionWhereInput {
 
 export interface FiltrosNotificacion {
   noLeidas?: boolean;
+  // Solo las ya atendidas (historial), con quién y cuándo
+  atendidas?: boolean;
   prioridad?: PrioridadAlerta;
   pagina?: number;
   porPagina?: number;
@@ -25,12 +27,12 @@ export interface FiltrosNotificacion {
 }
 
 export async function listarNotificaciones(filtros: FiltrosNotificacion, usuarioIdActual: string) {
-  const { noLeidas, prioridad, pagina = 1, porPagina = 20, limite } = filtros;
+  const { noLeidas, atendidas, prioridad, pagina = 1, porPagina = 20, limite } = filtros;
 
   const donde: Prisma.NotificacionWhereInput = {
     ...perteneceAUsuario(usuarioIdActual),
-    // Por defecto excluir abordadas (DESCARTADA); si se pide "no leídas" también excluye leídas
-    ...(noLeidas === true
+    // Por defecto excluir atendidas (DESCARTADA); si se pide "no leídas" también excluye leídas
+    ...(atendidas ? { estado: 'DESCARTADA' } : noLeidas === true
       ? { estado: { not: 'DESCARTADA' }, leida: false }
       : noLeidas === false
         ? { /* incluir todas, sin filtro extra */ }
@@ -43,7 +45,8 @@ export async function listarNotificaciones(filtros: FiltrosNotificacion, usuario
   const [registros, total] = await prisma.$transaction([
     prisma.notificacion.findMany({
       where: donde,
-      orderBy: [{ leida: 'asc' }, { creadoEn: 'desc' }],
+      include: { atendidaPor: { select: { nombre: true, apellido: true } } },
+      orderBy: atendidas ? [{ fechaLeida: 'desc' }] : [{ leida: 'asc' }, { creadoEn: 'desc' }],
       skip: limite ? 0 : (pagina - 1) * porPagina,
       take: tomar,
     }),
@@ -90,29 +93,44 @@ export async function eliminarNotificacion(id: string, usuarioId: string) {
   return prisma.notificacion.delete({ where: { id } });
 }
 
+// Una misma alerta llega a cada destinatario como una notificación propia.
+// Son "la misma" las que hablan de la misma entidad con el mismo título; sin
+// entidad, solo la propia notificación.
+function mismaAlerta(n: { id: string; entidadTipo: string | null; entidadId: string | null; titulo: string }): Prisma.NotificacionWhereInput {
+  return n.entidadId ? { entidadTipo: n.entidadTipo, entidadId: n.entidadId, titulo: n.titulo } : { id: n.id };
+}
+
 /**
- * Marca una notificación como abordada (estado DESCARTADA).
- * Las notificaciones abordadas dejan de contar en el badge y el dashboard.
+ * Atiende una alerta (estado DESCARTADA): se cierra para todos los que la
+ * recibieron, quedando registrado quién la atendió y cuándo (fechaLeida).
+ * Las atendidas dejan de contar en el badge y el dashboard.
  */
 export async function abordarNotificacion(id: string, usuarioId: string) {
   const notificacion = await prisma.notificacion.findFirst({
     where: { id, ...perteneceAUsuario(usuarioId) },
-    select: { id: true },
+    select: { id: true, entidadTipo: true, entidadId: true, titulo: true },
   });
   if (!notificacion) throw new ErrorNoEncontrado('Notificación no encontrada');
-  return prisma.notificacion.update({
-    where: { id },
-    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date() },
+  const resultado = await prisma.notificacion.updateMany({
+    where: { ...mismaAlerta(notificacion), estado: { not: 'DESCARTADA' } },
+    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date(), atendidaPorId: usuarioId },
   });
+  return { id, atendidas: resultado.count };
 }
 
 /**
- * Marca todas las notificaciones pendientes del usuario como abordadas.
+ * Atiende todas las alertas pendientes del usuario (y, con cada una, las
+ * copias que recibieron los demás destinatarios).
  */
 export async function abordarTodasNotificaciones(usuarioId: string) {
-  const resultado = await prisma.notificacion.updateMany({
+  const pendientes = await prisma.notificacion.findMany({
     where: { ...perteneceAUsuario(usuarioId), estado: { not: 'DESCARTADA' } },
-    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date() },
+    select: { id: true, entidadTipo: true, entidadId: true, titulo: true },
+  });
+  if (!pendientes.length) return { actualizadas: 0 };
+  const resultado = await prisma.notificacion.updateMany({
+    where: { OR: pendientes.map(mismaAlerta), estado: { not: 'DESCARTADA' } },
+    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date(), atendidaPorId: usuarioId },
   });
   return { actualizadas: resultado.count };
 }
@@ -123,14 +141,16 @@ export async function abordarTodasNotificaciones(usuarioId: string) {
  */
 export async function resolverNotificacionesDeEntidad(
   entidadTipo: string,
-  entidadId: string,
+  entidadId: string | string[],
+  atendidaPorId?: string,
 ): Promise<void> {
   await prisma.notificacion.updateMany({
     where: {
       entidadTipo,
-      entidadId,
+      entidadId: Array.isArray(entidadId) ? { in: entidadId } : entidadId,
       estado: { not: 'DESCARTADA' },
     },
-    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date() },
+    // Quien hizo la acción que resolvió la alerta queda como quien la atendió
+    data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date(), atendidaPorId },
   });
 }

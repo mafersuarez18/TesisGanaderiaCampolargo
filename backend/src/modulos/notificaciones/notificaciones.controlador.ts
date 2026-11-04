@@ -22,6 +22,7 @@ import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/p
 
 const esquemaFiltros = z.object({
   noLeidas:  z.coerce.boolean().optional(),
+  atendidas: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
   prioridad: z.nativeEnum(PrioridadAlerta).optional(),
   pagina:    z.coerce.number().int().positive().default(1),
   porPagina: z.coerce.number().int().positive().max(100).default(20),

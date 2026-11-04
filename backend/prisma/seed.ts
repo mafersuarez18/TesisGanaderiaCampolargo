@@ -533,6 +533,8 @@ async function main() {
       descripcion: 'Hembras y machos reproductores desde los 3 meses. Primera dosis + un mes después + anual. Hembras: al mes + un mes posparto + luego anual. 5 ml intramuscular. Con asesoría veterinaria y diagnóstico previo en el predio.',
       intervaloDias: 365,
       edadMinimasDias: 90,
+      // Enfermedades reproductivas: se vacunan los animales de cría y leche
+      aplicaAPropositos: ['REPRODUCCION', 'LECHE', 'CARNE_LECHE'],
       medicamentoId: vacunaIBRDVB.id,
     },
   });

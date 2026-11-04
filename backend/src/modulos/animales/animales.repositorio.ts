@@ -187,6 +187,8 @@ const seleccionCriaPendiente = {
           lote: { select: { id: true, nombre: true, finca: { select: { id: true, nombre: true } } } },
         },
       },
+      // Toro que la preñó (si se registró): queda como padre de la cría
+      padre: { select: { id: true, numeroIdentificacion: true, nombre: true } },
       eventoReproductivo: {
         select: {
           tipo: true,

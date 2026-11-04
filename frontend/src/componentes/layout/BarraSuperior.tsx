@@ -310,9 +310,9 @@ export default function BarraSuperior({ alAbrirMenu }: PropiedadesBarraSuperior)
                         <button
                           onClick={() => mutacionAbordarTodas.mutate()}
                           className="text-xs text-primary hover:underline"
-                          title="Marcar todas como abordadas (desaparecen del panel)"
+                          title="Atiende todas tus alertas: se cierran también para los demás destinatarios"
                         >
-                          Abordar todas
+                          Atender todas
                         </button>
                       )}
                     </div>
@@ -356,10 +356,10 @@ export default function BarraSuperior({ alAbrirMenu }: PropiedadesBarraSuperior)
                               onClick={(e) => { e.stopPropagation(); mutacionAbordar.mutate(notif.id); }}
                               disabled={mutacionAbordar.isPending}
                               className="mt-1.5 flex items-center gap-1 text-[10px] text-on-surface-variant hover:text-primary transition-colors ml-7"
-                              title="Marcar como abordada — desaparece hasta que se genere de nuevo"
+                              title="Atender — se cierra para todos los que la recibieron"
                             >
                               <Icono nombre="check_circle" clase="text-[12px]" />
-                              Marcar como abordada
+                              Atender
                             </button>
                           </div>
                         ))

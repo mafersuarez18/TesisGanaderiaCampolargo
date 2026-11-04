@@ -4,8 +4,8 @@ import { EsqueletoLinea } from '../../../componentes/ui/EsqueletoTarjeta';
 import { BadgePrioridad } from '../../../componentes/ui/Badge';
 import Icono from '../../../componentes/ui/Icono';
 
-// Últimas notificaciones críticas/altas sin abordar, con acceso rápido
-// para marcarlas como abordadas desde el propio dashboard.
+// Últimas notificaciones críticas/altas sin atender, con acceso rápido
+// para atenderlas desde el propio dashboard.
 interface AlertaResumen {
   id: string;
   titulo: string;
@@ -103,10 +103,10 @@ export default function ListaAlertasRecientes() {
                 onClick={() => mutAbordar.mutate(alerta.id)}
                 disabled={mutAbordar.isPending}
                 className="mt-1 flex items-center gap-1 text-[10px] text-on-surface-variant hover:text-primary transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                title="Abordar — desaparece del dashboard y la campanita"
+                title="Atender — se cierra para todos los que la recibieron"
               >
                 <Icono nombre="check_circle" clase="text-[11px]" />
-                Abordar
+                Atender
               </button>
             </div>
             <BadgePrioridad prioridad={alerta.prioridad} />

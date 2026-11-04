@@ -376,8 +376,11 @@ model Animal {
   historialesMedicos     HistorialMedico[]
   registrosVacunacion    RegistroVacunacion[]
   programasDesparasitacion ProgramaDesparasitacion[]
-  eventosReproductivos   EventoReproductivo[]
+  eventosReproductivos   EventoReproductivo[] @relation("EventoDelAnimal")
   gestacionesComoMadre   Gestacion[]          @relation("GestacionMadre")
+  // Como toro: montas naturales en las que sirvió y gestaciones que originó
+  montasComoToro         EventoReproductivo[] @relation("MontaToro")
+  gestacionesComoPadre   Gestacion[]          @relation("GestacionPadre")
   nacimientosComoCria    Nacimiento?          @relation("NacimientoCria")
   nacimientoOrigen       Nacimiento?          @relation("NacimientoOrigenAnimal", fields: [nacimientoId], references: [id], onDelete: SetNull)
   registrosUbicacion     RegistroUbicacion[]
@@ -722,8 +725,11 @@ model EventoReproductivo {
 
   animalId      String @map("animal_id")
   registradoPorId String @map("usuario_id")
+  // Solo en monta natural: el toro que sirvió (si se sabe)
+  toroId        String? @map("toro_id")
+  toro          Animal? @relation("MontaToro", fields: [toroId], references: [id], onDelete: SetNull)
 
-  animal         Animal  @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  animal         Animal  @relation("EventoDelAnimal", fields: [animalId], references: [id], onDelete: Cascade)
   registradoPor  Usuario @relation("EventosReproductivosRegistrados", fields: [registradoPorId], references: [id], onDelete: Restrict)
 
   // Datos específicos según tipo de evento
@@ -787,6 +793,11 @@ model Gestacion {
 
   madreId String
   madre   Animal @relation("GestacionMadre", fields: [madreId], references: [id], onDelete: Restrict)
+
+  // Toro que la preñó, cuando se sabe (monta natural o indicado en el
+  // diagnóstico). En inseminación el padre es el semental del lote de semen.
+  padreId String? @map("padre_id")
+  padre   Animal? @relation("GestacionPadre", fields: [padreId], references: [id], onDelete: SetNull)
 
   // Evento reproductivo (monta natural o inseminación) que originó esta gestación,
   // cuando quedó registrado formalmente. Queda opcional porque en campo también se
@@ -984,7 +995,8 @@ model Usuario {
   informacionEpidemiologicaRegistrada InformacionEpidemiologica[] @relation("InformacionEpidemiologicaRegistrada")
   desparasitacionesAplicadas   ProgramaDesparasitacion[] @relation("DesparasitacionesAplicadas")
   vitaminasAplicadas           RegistroVitaminas[]       @relation("VitaminasAplicadas")
-  notificaciones               Notificacion[]
+  notificaciones               Notificacion[] @relation("NotificacionDestinatario")
+  notificacionesAtendidas      Notificacion[] @relation("NotificacionAtendidaPor")
   registrosAuditoria           RegistroAuditoria[]
   reglasAlertaCreadas          ReglaAlerta[]
   reglasAlertaNotificado       ReglaAlertaUsuario[]
@@ -1072,8 +1084,13 @@ model Notificacion {
   // regla-usuario que dio origen a la notificación, no queda forma válida de
   // conservarla (dejaría usuarioId y reglaUsuarioId nulos a la vez, lo que
   // viola el CHECK), así que se elimina junto con su origen.
-  usuario      Usuario?            @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuario      Usuario?            @relation("NotificacionDestinatario", fields: [usuarioId], references: [id], onDelete: Cascade)
   reglaUsuario ReglaAlertaUsuario? @relation(fields: [reglaUsuarioId], references: [id], onDelete: Cascade)
+
+  // Quién atendió la alerta (con "Atender" o con la acción que la resolvió).
+  // Al atenderla se cierra para todos sus destinatarios; la fecha es fechaLeida.
+  atendidaPorId String?  @map("atendida_por_id")
+  atendidaPor   Usuario? @relation("NotificacionAtendidaPor", fields: [atendidaPorId], references: [id], onDelete: SetNull)
 
   @@index([usuarioId])
   @@index([estado])

@@ -164,6 +164,7 @@ export default function PaginaFormAnimal() {
       loteId:          madre.lote.id,
       razaId:          madre.raza.id,
       madreId:         madre.id,
+      padreId:         cria.gestacion.padre?.id ?? '',
       procedencia:     'Nacida en la finca',
       observaciones:   cria.semental ? `Hija/o del semental ${cria.semental} (inseminación artificial).` : '',
     });
@@ -177,6 +178,9 @@ export default function PaginaFormAnimal() {
   useEffect(() => {
     if (cria && hembras.length) setValue('madreId', cria.gestacion.madre.id);
   }, [cria, hembras, setValue]);
+  useEffect(() => {
+    if (cria?.gestacion.padre && machos.length) setValue('padreId', cria.gestacion.padre.id);
+  }, [cria, machos, setValue]);
 
   const mutacion = useMutation({
     mutationFn: async (datos: FormularioAnimal) => {

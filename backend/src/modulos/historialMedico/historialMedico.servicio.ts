@@ -1,6 +1,7 @@
 import { Prisma, EstadoSanitario, EstadoReproductivo, TipoDesparasitante, NivelGravedad, TipoPruebaComplementaria } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
+import { resolverNotificacionesDeEntidad } from '../notificaciones/notificaciones.servicio';
 
 /**
  * Recalcula Animal.estadoSanitario a partir de lo que sigue activo/en curso
@@ -478,7 +479,7 @@ export interface DatosFinalizarTratamiento {
  * le quede activo/en curso, y descarta la notificación que originó la
  * pregunta para que deje de aparecer como pendiente.
  */
-export async function finalizarTratamiento(tratamientoId: string, datos: DatosFinalizarTratamiento) {
+export async function finalizarTratamiento(tratamientoId: string, datos: DatosFinalizarTratamiento, usuarioId?: string) {
   const tratamiento = await prisma.tratamiento.findUnique({
     where: { id: tratamientoId },
     select: {
@@ -515,10 +516,7 @@ export async function finalizarTratamiento(tratamientoId: string, datos: DatosFi
   const nuevoEstadoSanitario = await recalcularEstadoSanitarioAnimal(animalId);
 
   // La notificación que preguntaba por este tratamiento ya no aplica.
-  await prisma.notificacion.updateMany({
-    where: { entidadTipo: 'Tratamiento', entidadId: tratamientoId, leida: false },
-    data: { leida: true, estado: 'LEIDA', fechaLeida: new Date() },
-  });
+  await resolverNotificacionesDeEntidad('Tratamiento', tratamientoId, usuarioId);
 
   return { tratamientoId, animalId, nuevoEstadoSanitario };
 }

@@ -11,8 +11,9 @@ import CampoFecha from '../../componentes/ui/CampoFecha';
 import FiltroAnimal from '../../componentes/ui/FiltroAnimal';
 import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
 import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/reproduccion/ModalResultadoParto';
+import ModalDetalleEvento from '../../componentes/reproduccion/ModalDetalleEvento';
 import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
-import { isoMediodia } from '../../servicios/fechas';
+import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 
 // Ciclo reproductivo: servicios (inseminación/monta) por confirmar, partos
 // próximos, eventos (celo, monta, diagnóstico de gestación, parto...) e
@@ -42,9 +43,13 @@ interface PartoProximo {
   madreNumeroIdentificacion: string;
   madreNombre?: string;
   finca: string;
+  fechaInicio: string;
   fechaPartoEsperado: string;
   diasRestantes: number;
   clasificacion: 'vencido' | 'urgente' | 'proximo' | 'futuro';
+  diasGestacion: number;
+  /** Toro o semental, si se sabe. */
+  padre: string | null;
 }
 
 interface ServicioPorConfirmar {
@@ -54,6 +59,7 @@ interface ServicioPorConfirmar {
   observaciones?: string;
   animal: { id: string; numeroIdentificacion: string; nombre?: string; lote?: { finca?: { nombre: string } } };
   semental: string | null;
+  toro: string | null;
   numeroIntento: number | null;
   diasTranscurridos: number;
   fechaRevision: string;
@@ -135,13 +141,17 @@ export default function PaginaReproduccion() {
   const [loteIndicadores, setLoteIndicadores] = useState('');
   const [razaIndicadores, setRazaIndicadores] = useState('');
   const [servicioAConfirmar, setServicioAConfirmar] = useState<ServicioAConfirmar | null>(null);
+  // Servicio por confirmar cuyo detalle se está viendo
+  const [servicioDetalle, setServicioDetalle] = useState<ServicioPorConfirmar | null>(null);
+  // Evento del historial cuyo detalle se está viendo
+  const [eventoDetalleId, setEventoDetalleId] = useState<string | null>(null);
   const [prenadaInicial, setPrenadaInicial] = useState(true);
   const [gestacionACerrar, setGestacionACerrar] = useState<GestacionACerrar | null>(null);
 
   const { data: partosData, isLoading: cargandoPartos } = useQuery<PartoProximo[]>({
     queryKey: ['partos-proximos'],
     queryFn: () =>
-      clienteHttp.get('/reproduccion/partos-proximos', { params: { dias: 60, limite: 50, incluirVencidos: true } })
+      clienteHttp.get('/reproduccion/partos-proximos', { params: { dias: 300, limite: 50, incluirVencidos: true } })
         .then((r) => r.data.datos ?? r.data),
     refetchInterval: 5 * 60_000,
   });
@@ -211,7 +221,9 @@ export default function PaginaReproduccion() {
 
   const abrirConfirmacion = (s: ServicioPorConfirmar, prenada: boolean) => {
     setPrenadaInicial(prenada);
-    setServicioAConfirmar({ id: s.id, descripcion: nombreAnimal(s.animal.numeroIdentificacion, s.animal.nombre), fecha: s.fecha });
+    setServicioAConfirmar({
+      id: s.id, descripcion: nombreAnimal(s.animal.numeroIdentificacion, s.animal.nombre), fecha: s.fecha, tipo: s.tipo, toro: s.toro,
+    });
   };
   const avisosPestana: Record<string, number> = {
     servicios: serviciosListos.length,
@@ -220,7 +232,8 @@ export default function PaginaReproduccion() {
   const abrirCierre = (p: PartoProximo) =>
     setGestacionACerrar({ id: p.id, descripcion: nombreAnimal(p.madreNumeroIdentificacion, p.madreNombre) });
   const proximos = partos.filter((p) => p.diasRestantes > 7 && p.diasRestantes <= 30);
-  const futuros  = partos.filter((p) => p.diasRestantes > 30);
+  const futuros  = partos.filter((p) => p.diasRestantes > 30 && p.diasRestantes <= 90);
+  const enCurso  = partos.filter((p) => p.diasRestantes > 90);
 
   return (
     <div className="space-y-5">
@@ -253,7 +266,7 @@ export default function PaginaReproduccion() {
         <div className="flex gap-1 p-1 bg-surface-container rounded-xl overflow-x-auto max-w-full">
           {([
             { clave: 'servicios',   et: 'Por confirmar',    ico: 'science' },
-            { clave: 'partos',      et: 'Partos Próximos',  ico: 'child_care' },
+            { clave: 'partos',      et: 'Gestaciones',      ico: 'child_care' },
             { clave: 'eventos',     et: 'Historial',         ico: 'history' },
             { clave: 'indicadores', et: 'Indicadores',       ico: 'bar_chart' },
           ] as const).map((p) => (
@@ -321,7 +334,7 @@ export default function PaginaReproduccion() {
                   >
                     <button
                       type="button"
-                      onClick={() => navegar(`/animales/${s.animal.id}`)}
+                      onClick={() => setServicioDetalle(s)}
                       className="flex items-center gap-3 flex-1 min-w-0 text-left"
                     >
                       <div className="p-2 bg-surface-container rounded-xl flex-shrink-0">
@@ -334,7 +347,7 @@ export default function PaginaReproduccion() {
                         <p className="text-xs text-on-surface-variant">
                           {TIPO_EVENTO[s.tipo]?.etiqueta} del{' '}
                           {new Date(s.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}
-                          {s.semental && ` · ${s.semental}`}
+                          {s.semental && ` · ${s.semental}`}{s.toro && ` · Toro ${s.toro}`}
                           {' · '}hace {s.diasTranscurridos} día(s)
                         </p>
                       </div>
@@ -379,8 +392,8 @@ export default function PaginaReproduccion() {
             ) : !partos.length ? (
               <div className="tarjeta-vidrio rounded-2xl p-12 text-center">
                 <Icono nombre="event_available" clase="text-[40px] text-outline mx-auto mb-3" />
-                <p className="font-medium text-on-surface-variant">Sin partos programados</p>
-                <p className="text-sm text-outline mt-1">No hay gestaciones con parto en los próximos 60 días</p>
+                <p className="font-medium text-on-surface-variant">Sin gestaciones en curso</p>
+                <p className="text-sm text-outline mt-1">Aparecen aquí al confirmar una preñez (diagnóstico positivo)</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -397,7 +410,11 @@ export default function PaginaReproduccion() {
                     onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
                 )}
                 {futuros.length > 0 && (
-                  <GrupoPartos titulo="Futuros (31–60 días)" urgencia="baja" partos={futuros}
+                  <GrupoPartos titulo="Próximos meses (31–90 días)" urgencia="baja" partos={futuros}
+                    onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
+                )}
+                {enCurso.length > 0 && (
+                  <GrupoPartos titulo="Gestaciones en curso (más de 90 días para el parto)" urgencia="baja" partos={enCurso}
                     onVerAnimal={(id) => navegar(`/animales/${id}`)} onRegistrar={abrirCierre} />
                 )}
               </div>
@@ -453,7 +470,7 @@ export default function PaginaReproduccion() {
                       key={ev.id}
                       className={`p-4 hover:bg-surface-container-low cursor-pointer transition-colors
                                  ${idx < eventos.length - 1 ? 'border-b border-outline-variant/20' : ''}`}
-                      onClick={() => navegar(`/animales/${ev.animal.id}`)}
+                      onClick={() => setEventoDetalleId(ev.id)}
                     >
                       <div className="flex items-start gap-3">
                         <div className="p-2 rounded-xl bg-surface-container mt-0.5 flex-shrink-0">
@@ -725,6 +742,7 @@ export default function PaginaReproduccion() {
       <AnimatePresence>
         {mostrarForm && (
           <FormularioEvento
+            servicios={servicios}
             onCerrar={() => setMostrarForm(false)}
             onExito={() => {
               invalidarSeguimientoReproductivo(queryClient);
@@ -740,6 +758,21 @@ export default function PaginaReproduccion() {
         alCerrar={() => setServicioAConfirmar(null)}
       />
       <ModalResultadoParto gestacion={gestacionACerrar} alCerrar={() => setGestacionACerrar(null)} />
+      <ModalDetalleEvento
+        eventoId={servicioDetalle?.id ?? null}
+        alCerrar={() => setServicioDetalle(null)}
+        alVerAnimal={(animalId) => navegar(`/animales/${animalId}`)}
+        alConfirmar={(prenada) => {
+          if (!servicioDetalle) return;
+          setServicioDetalle(null);
+          abrirConfirmacion(servicioDetalle, prenada);
+        }}
+      />
+      <ModalDetalleEvento
+        eventoId={eventoDetalleId}
+        alCerrar={() => setEventoDetalleId(null)}
+        alVerAnimal={(animalId) => navegar(`/animales/${animalId}`)}
+      />
     </div>
   );
 }
@@ -783,7 +816,14 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal, onRegistrar }: {
                   #{p.madreNumeroIdentificacion}
                   {p.madreNombre && <span className="font-normal text-on-surface-variant"> · {p.madreNombre}</span>}
                 </span>
-                <p className="text-xs text-on-surface-variant">{p.finca}</p>
+                <p className="text-xs text-on-surface-variant">
+                  {p.finca} · Día {p.diasGestacion} de gestación (semana {Math.floor(p.diasGestacion / 7)})
+                  {p.padre && ` · Padre: ${p.padre}`}
+                </p>
+                <div className="mt-1.5 h-1 w-40 max-w-full rounded-full bg-white/80 overflow-hidden">
+                  <div className="h-full bg-secondary rounded-full"
+                    style={{ width: `${Math.min(100, Math.round((p.diasGestacion / DIAS_GESTACION_BOVINA) * 100))}%` }} />
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -793,7 +833,7 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal, onRegistrar }: {
                 </p>
                 <Badge variante={cfg.badge} tamano="xs">
                   {p.diasRestantes < 0 ? `Hace ${-p.diasRestantes} día(s)`
-                    : p.diasRestantes === 0 ? 'Hoy' : p.diasRestantes === 1 ? 'Mañana' : `${p.diasRestantes} días`}
+                    : p.diasRestantes === 0 ? 'Hoy' : p.diasRestantes === 1 ? 'Mañana' : `Faltan ${p.diasRestantes} días`}
                 </Badge>
               </div>
               <button
@@ -805,7 +845,7 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal, onRegistrar }: {
                     : 'bg-white/80 text-on-surface-variant hover:text-primary'
                 }`}
               >
-                Registrar parto
+                Registrar resultado
               </button>
             </div>
           </div>
@@ -816,21 +856,23 @@ function GrupoPartos({ titulo, urgencia, partos, onVerAnimal, onRegistrar }: {
 }
 
 // ── Formulario: Nuevo Evento ──────────────────────────────────────────────────
+// Solo los eventos que nacen aquí. La inseminación se registra en el módulo
+// de Inseminación (descuenta la dosis de semen) y el parto o aborto al
+// registrar el resultado de la gestación (pestaña Gestaciones), que es donde
+// se anota la cría.
 
 const TIPOS_FORM = [
-  { valor: 'GESTACION',               etiqueta: 'Gestación (nueva)' },
   { valor: 'DETECCION_CELO',          etiqueta: 'Detección de Celo' },
-  { valor: 'INSEMINACION_ARTIFICIAL', etiqueta: 'Inseminación Artificial' },
   { valor: 'MONTA_NATURAL',           etiqueta: 'Monta Natural' },
   { valor: 'DIAGNOSTICO_GESTACION',   etiqueta: 'Diagnóstico de Gestación' },
-  { valor: 'PARTO',                   etiqueta: 'Parto' },
-  { valor: 'ABORTO',                  etiqueta: 'Aborto' },
   { valor: 'DESTETE',                 etiqueta: 'Destete' },
   { valor: 'DESCARTE_REPRODUCTIVO',   etiqueta: 'Descarte Reproductivo' },
 ];
 
 const DIAS_GESTACION_BOVINA = 283;
-const TIPOS_INICIAN_GESTACION = new Set(['INSEMINACION_ARTIFICIAL', 'MONTA_NATURAL']);
+// Días de gestación que se asumen en un diagnóstico positivo si no se sabe
+// cuándo fue la monta (edad típica de la preñez al diagnosticarla).
+const DIAS_DIAGNOSTICO_TIPICO = 35;
 // Destete y descarte aplican a ambos sexos; el resto solo a hembras (el
 // backend también lo valida).
 const TIPOS_AMBOS_SEXOS = new Set(['DESTETE', 'DESCARTE_REPRODUCTIVO']);
@@ -839,108 +881,62 @@ function sumarDias(fechaStr: string, dias: number): string {
   if (!fechaStr) return '';
   const d = new Date(fechaStr + 'T12:00:00');
   d.setDate(d.getDate() + dias);
-  return d.toISOString().split('T')[0];
+  return fechaLocalISO(d);
 }
 
-function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito: () => void }) {
-  const hoy = new Date().toISOString().split('T')[0];
+function FormularioEvento({ servicios, onCerrar, onExito }: {
+  servicios: ServicioPorConfirmar[];
+  onCerrar: () => void;
+  onExito: () => void;
+}) {
+  const hoy = fechaLocalISO();
   const [form, setForm] = useState({
     animalId: '',
     tipo: 'DETECCION_CELO',
     fecha: hoy,
     observaciones: '',
-    fechaInicio: hoy,
-    fechaPartoEsperado: '',
-    // Por defecto un servicio queda "por confirmar" y la gestación se abre
-    // cuando se confirma la preñez; marcarlo solo si ya se sabe que preñó.
-    crearGestacion: false,
+    toroId: '',
     resultadoDiagnostico: '',
-    // Campos IA
-    clasificacionIA: '',
-    tecnicaDeposicion: '',
-    patologiasVaca: '',
-    tasaMetabolicaBasal: '',
-    balanceEnergetico: '',
-    temperaturaUterina: '',
-    manejoHato: '',
+    metodoDiagnostico: 'Ecografía',
+    fechaInicioGestacion: sumarDias(hoy, -DIAS_DIAGNOSTICO_TIPICO),
+    fechaPartoEsperado: sumarDias(hoy, DIAS_GESTACION_BOVINA - DIAS_DIAGNOSTICO_TIPICO),
   });
   const [error, setError] = useState('');
   const [sexoAnimal, setSexoAnimal] = useState<'MACHO' | 'HEMBRA' | null>(null);
 
-  const soloHembras      = !TIPOS_AMBOS_SEXOS.has(form.tipo);
-  const esGestacion      = form.tipo === 'GESTACION';
-  const esIA             = form.tipo === 'INSEMINACION_ARTIFICIAL';
-  const iniciaGestacion  = TIPOS_INICIAN_GESTACION.has(form.tipo);
+  const soloHembras  = !TIPOS_AMBOS_SEXOS.has(form.tipo);
+  const esMonta      = form.tipo === 'MONTA_NATURAL';
+  const esDiagnostico = form.tipo === 'DIAGNOSTICO_GESTACION';
+  const positivo     = esDiagnostico && form.resultadoDiagnostico === 'POSITIVO';
+  // Si la hembra tiene un servicio por confirmar, el diagnóstico lo confirma:
+  // la concepción es la fecha de ese servicio.
+  const pendiente    = servicios.find((s) => s.animal.id === form.animalId);
+  // En una inseminación el padre es el semental; en una monta, el toro de la
+  // monta (si se registró). Solo se pregunta cuando no se sabe por el servicio.
+  const preguntarPadre = positivo && pendiente?.tipo !== 'INSEMINACION_ARTIFICIAL';
 
-  function handleTipo(nuevoTipo: string) {
-    setForm((f) => {
-      const fechaBase = nuevoTipo === 'GESTACION' ? f.fechaInicio : f.fecha;
-      const autoCalc  = nuevoTipo === 'GESTACION' || TIPOS_INICIAN_GESTACION.has(nuevoTipo);
-      return {
-        ...f,
-        tipo: nuevoTipo,
-        fechaPartoEsperado: autoCalc ? sumarDias(fechaBase, DIAS_GESTACION_BOVINA) : '',
-      };
-    });
-  }
-
-  function handleFecha(nuevaFecha: string) {
-    setForm((f) => ({
-      ...f,
-      fecha: nuevaFecha,
-      ...(TIPOS_INICIAN_GESTACION.has(f.tipo) && {
-        fechaPartoEsperado: sumarDias(nuevaFecha, DIAS_GESTACION_BOVINA),
-      }),
-    }));
-  }
-
-  function handleFechaInicio(nuevaFechaInicio: string) {
-    setForm((f) => ({
-      ...f,
-      fechaInicio: nuevaFechaInicio,
-      fechaPartoEsperado: sumarDias(nuevaFechaInicio, DIAS_GESTACION_BOVINA),
-    }));
-  }
+  const cambiarConcepcion = (valor: string) =>
+    setForm((f) => ({ ...f, fechaInicioGestacion: valor, fechaPartoEsperado: sumarDias(valor, DIAS_GESTACION_BOVINA) }));
 
   const mutacion = useMutation({
     mutationFn: async (datos: typeof form) => {
-      if (datos.tipo === 'GESTACION') {
-        return clienteHttp.post('/reproduccion/gestaciones', {
-          madreId:            datos.animalId,
-          fechaInicio:        isoMediodia(datos.fechaInicio),
-          fechaPartoEsperado: isoMediodia(datos.fechaPartoEsperado),
-          observaciones:      datos.observaciones || undefined,
-        });
-      }
-      // Registrar el evento reproductivo
-      const payloadEvento: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         animalId:      datos.animalId,
         tipo:          datos.tipo,
         fecha:         isoMediodia(datos.fecha),
         observaciones: datos.observaciones || undefined,
       };
-      if (datos.tipo === 'INSEMINACION_ARTIFICIAL') {
-        if (datos.clasificacionIA)    payloadEvento.clasificacionIA    = datos.clasificacionIA;
-        if (datos.tecnicaDeposicion)  payloadEvento.tecnicaDeposicion  = datos.tecnicaDeposicion;
-        if (datos.patologiasVaca)     payloadEvento.patologiasVaca     = datos.patologiasVaca;
-        if (datos.tasaMetabolicaBasal) payloadEvento.tasaMetabolicaBasal = parseInt(datos.tasaMetabolicaBasal);
-        if (datos.balanceEnergetico)  payloadEvento.balanceEnergetico  = datos.balanceEnergetico;
-        if (datos.temperaturaUterina) payloadEvento.temperaturaUterina = parseFloat(datos.temperaturaUterina);
-        if (datos.manejoHato)         payloadEvento.manejoHato         = datos.manejoHato;
+      if (esMonta && datos.toroId) payload.toroId = datos.toroId;
+      if (esDiagnostico && datos.resultadoDiagnostico) {
+        payload.resultadoDiagnostico = datos.resultadoDiagnostico;
+        payload.metodoDiagnostico = datos.metodoDiagnostico || undefined;
       }
-      if (datos.tipo === 'DIAGNOSTICO_GESTACION' && datos.resultadoDiagnostico) {
-        payloadEvento.resultadoDiagnostico = datos.resultadoDiagnostico;
+      if (positivo) {
+        if (!pendiente) payload.fechaInicioGestacion = isoMediodia(datos.fechaInicioGestacion);
+        if (datos.fechaPartoEsperado) payload.fechaPartoEsperado = isoMediodia(datos.fechaPartoEsperado);
+        if (preguntarPadre && datos.toroId) payload.padreId = datos.toroId;
       }
-      await clienteHttp.post('/reproduccion', payloadEvento);
-      // Si es IA o Monta y se optó por registrar gestación, crearla también
-      if (TIPOS_INICIAN_GESTACION.has(datos.tipo) && datos.crearGestacion && datos.fechaPartoEsperado) {
-        await clienteHttp.post('/reproduccion/gestaciones', {
-          madreId:            datos.animalId,
-          fechaInicio:        isoMediodia(datos.fecha),
-          fechaPartoEsperado: isoMediodia(datos.fechaPartoEsperado),
-          observaciones:      datos.observaciones || undefined,
-        });
-      }
+      return clienteHttp.post('/reproduccion', payload);
     },
     onSuccess: () => onExito(),
     onError: (err: any) => setError(err?.response?.data?.mensaje ?? 'Error al registrar el evento'),
@@ -974,9 +970,8 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
             onSubmit={(e) => {
               e.preventDefault();
               if (!form.animalId) { setError('Debe seleccionar un animal'); return; }
-              if ((esGestacion || (iniciaGestacion && form.crearGestacion)) && !form.fechaPartoEsperado) {
-                setError('La fecha de parto esperado es requerida');
-                return;
+              if (positivo && !pendiente && !form.fechaInicioGestacion) {
+                setError('Indique la fecha estimada de concepción'); return;
               }
               setError('');
               mutacion.mutate(form);
@@ -989,6 +984,14 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                 {error}
               </div>
             )}
+
+            <p className="flex items-start gap-2 text-[11px] text-on-surface-variant px-3 py-2 bg-surface-container rounded-xl">
+              <Icono nombre="info" clase="text-[14px] flex-shrink-0 mt-px" />
+              <span>
+                Las inseminaciones se registran en el módulo <strong>Inseminación</strong>. El parto o aborto se registra
+                desde la pestaña <strong>Gestaciones</strong> con "Registrar resultado", donde se anota la cría.
+              </span>
+            </p>
 
             <div>
               <BuscadorAnimal
@@ -1016,7 +1019,7 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                 </label>
                 <select
                   value={form.tipo}
-                  onChange={(e) => handleTipo(e.target.value)}
+                  onChange={(e) => setForm((f) => ({ ...f, tipo: e.target.value, toroId: '' }))}
                   className="campo-entrada"
                 >
                   {TIPOS_FORM.map((t) => (
@@ -1031,172 +1034,105 @@ function FormularioEvento({ onCerrar, onExito }: { onCerrar: () => void; onExito
                 <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
                   Fecha <span className="text-error">*</span>
                 </label>
-                <CampoFecha
-                  value={form.fecha}
-                  onChange={(valor) => handleFecha(valor)}
-                />
+                <CampoFecha value={form.fecha} onChange={(valor) => setForm((f) => ({ ...f, fecha: valor }))} />
               </div>
             </div>
 
-            {/* Campos adicionales para Gestación */}
-            {esGestacion && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="overflow-hidden grid grid-cols-1 sm:grid-cols-2 gap-3"
-              >
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Inicio Gestación</label>
-                  <CampoFecha
-                    value={form.fechaInicio}
-                    onChange={(valor) => handleFechaInicio(valor)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                    Parto Esperado <span className="text-error">*</span>
-                  </label>
-                  <CampoFecha
-                    value={form.fechaPartoEsperado}
-                    onChange={(valor) => setForm((f) => ({ ...f, fechaPartoEsperado: valor }))}
-                  />
-                </div>
-              </motion.div>
-            )}
-
-            {/* Parto esperado para IA / Monta Natural */}
-            {iniciaGestacion && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="overflow-hidden space-y-3"
-              >
-                <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={form.crearGestacion}
-                    onChange={(e) => setForm((f) => ({ ...f, crearGestacion: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-primary"
-                  />
-                  <span className="text-xs text-on-surface">
-                    La preñez ya está confirmada (registrar la gestación ahora)
-                  </span>
-                </label>
-
-                {form.crearGestacion ? (
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
-                      Parto Esperado <span className="text-error">*</span>
-                    </label>
-                    <CampoFecha
-                      value={form.fechaPartoEsperado}
-                      onChange={(valor) => setForm((f) => ({ ...f, fechaPartoEsperado: valor }))}
-                    />
-                    <p className="text-[11px] text-on-surface-variant mt-1">
-                      Estimada a {DIAS_GESTACION_BOVINA} días de la fecha del evento; puede ajustarla.
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-xs text-on-surface-variant px-3.5 py-2.5 bg-surface-container rounded-xl">
-                    Quedará en <strong className="text-on-surface">Por confirmar</strong>. A los 21 días llegará una alerta
-                    para registrar si quedó preñada.
-                  </p>
-                )}
-              </motion.div>
-            )}
-
-            {form.tipo === 'DIAGNOSTICO_GESTACION' && (
-              <div>
-                <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Resultado</label>
-                <select
-                  value={form.resultadoDiagnostico}
-                  onChange={(e) => setForm((f) => ({ ...f, resultadoDiagnostico: e.target.value }))}
-                  className="campo-entrada"
-                >
-                  <option value="">Sin especificar</option>
-                  <option value="POSITIVO">Positivo (preñada)</option>
-                  <option value="NEGATIVO">Negativo (vacía)</option>
-                </select>
-                <p className="text-[11px] text-on-surface-variant mt-1">
-                  Si la hembra tiene una inseminación o monta por confirmar, este resultado la confirma
-                  (y abre la gestación si es positivo).
+            {/* ── Monta natural: toro y aviso de "por confirmar" ── */}
+            {esMonta && (
+              <div className="space-y-2">
+                <BuscadorAnimal
+                  etiqueta="Toro (si se sabe)"
+                  valor={form.toroId}
+                  alSeleccionar={(id) => setForm((f) => ({ ...f, toroId: id }))}
+                  sexo="MACHO"
+                  placeholder="Buscar toro por identificación o nombre..."
+                />
+                <p className="text-xs text-on-surface-variant px-3.5 py-2.5 bg-surface-container rounded-xl">
+                  Quedará en <strong className="text-on-surface">Por confirmar</strong>. A los 21 días llegará una alerta
+                  para registrar si quedó preñada; al confirmarlo se abre la gestación con este toro como padre.
                 </p>
               </div>
             )}
 
-            {/* ── Campos específicos de IA ── */}
-            {esIA && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="overflow-hidden space-y-3 p-4 bg-surface-container rounded-xl border border-outline-variant/30"
-              >
-                <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide">
-                  Datos de Inseminación Artificial
-                </p>
+            {/* ── Diagnóstico: resultado y, si es positivo, la gestación ── */}
+            {esDiagnostico && (
+              <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Clasificación</label>
-                    <select value={form.clasificacionIA}
-                      onChange={(e) => setForm((f) => ({ ...f, clasificacionIA: e.target.value }))}
-                      className="campo-entrada text-sm">
-                      <option value="">No especificado</option>
-                      <option value="CELO_DETECTADO">Celo detectado</option>
-                      <option value="TIEMPO_FIJO">Tiempo fijo (IATF)</option>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Resultado</label>
+                    <select
+                      value={form.resultadoDiagnostico}
+                      onChange={(e) => setForm((f) => ({ ...f, resultadoDiagnostico: e.target.value }))}
+                      className="campo-entrada"
+                    >
+                      <option value="">Sin especificar</option>
+                      <option value="POSITIVO">Positivo (preñada)</option>
+                      <option value="NEGATIVO">Negativo (vacía)</option>
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Técnica de deposición</label>
-                    <select value={form.tecnicaDeposicion}
-                      onChange={(e) => setForm((f) => ({ ...f, tecnicaDeposicion: e.target.value }))}
-                      className="campo-entrada text-sm">
-                      <option value="">No especificado</option>
-                      <option value="INTRAUTERINA_RECTOVAGINAL">Intrauterina rectovaginal</option>
-                      <option value="INTRAUTERINA_PROFUNDA">Intrauterina profunda</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Tasa metabólica basal (1–5)</label>
-                    <input type="number" min="1" max="5" step="1"
-                      value={form.tasaMetabolicaBasal}
-                      onChange={(e) => setForm((f) => ({ ...f, tasaMetabolicaBasal: e.target.value }))}
-                      placeholder="1=bajo, 5=alto" className="campo-entrada text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Temperatura uterina (°C)</label>
-                    <input type="number" step="0.1"
-                      value={form.temperaturaUterina}
-                      onChange={(e) => setForm((f) => ({ ...f, temperaturaUterina: e.target.value }))}
-                      placeholder="Ej: 38.8" className="campo-entrada text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Balance energético</label>
-                    <input type="text"
-                      value={form.balanceEnergetico}
-                      onChange={(e) => setForm((f) => ({ ...f, balanceEnergetico: e.target.value }))}
-                      placeholder="Positivo, negativo..." className="campo-entrada text-sm" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Manejo del hato (estrés)</label>
-                    <select value={form.manejoHato}
-                      onChange={(e) => setForm((f) => ({ ...f, manejoHato: e.target.value }))}
-                      className="campo-entrada text-sm">
-                      <option value="">No especificado</option>
-                      <option value="BAJO">Bajo</option>
-                      <option value="MEDIO">Medio</option>
-                      <option value="ALTO">Alto</option>
+                    <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Método</label>
+                    <select
+                      value={form.metodoDiagnostico}
+                      onChange={(e) => setForm((f) => ({ ...f, metodoDiagnostico: e.target.value }))}
+                      className="campo-entrada"
+                    >
+                      <option value="Ecografía">Ecografía</option>
+                      <option value="Palpación rectal">Palpación rectal</option>
                     </select>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Patologías de la vaca</label>
-                  <textarea rows={2}
-                    value={form.patologiasVaca}
-                    onChange={(e) => setForm((f) => ({ ...f, patologiasVaca: e.target.value }))}
-                    placeholder="Describa patologías relevantes que puedan afectar la IA..."
-                    className="campo-entrada resize-none text-sm" />
-                </div>
-              </motion.div>
+
+                {pendiente && form.resultadoDiagnostico && (
+                  <p className="text-xs text-on-surface-variant px-3.5 py-2.5 bg-surface-container rounded-xl">
+                    Confirma la {pendiente.tipo === 'MONTA_NATURAL' ? 'monta' : 'inseminación'} del{' '}
+                    <strong className="text-on-surface">
+                      {new Date(pendiente.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </strong>
+                    {pendiente.semental && ` (${pendiente.semental})`}
+                    {positivo ? ': la gestación se cuenta desde esa fecha.' : '.'}
+                  </p>
+                )}
+
+                {positivo && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                    className="overflow-hidden space-y-3 p-4 bg-primary/5 rounded-xl border border-primary/20">
+                    <p className="text-xs font-semibold text-primary uppercase tracking-wide flex items-center gap-1.5">
+                      <Icono nombre="vaca_prenada" clase="text-[16px]" /> Se abrirá la gestación
+                    </p>
+                    {!pendiente && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">
+                            Concepción estimada <span className="text-error">*</span>
+                          </label>
+                          <CampoFecha value={form.fechaInicioGestacion} onChange={cambiarConcepcion} />
+                          <p className="text-[11px] text-on-surface-variant mt-1">Fecha probable de la monta.</p>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Parto esperado</label>
+                          <CampoFecha value={form.fechaPartoEsperado}
+                            onChange={(valor) => setForm((f) => ({ ...f, fechaPartoEsperado: valor }))} />
+                          <p className="text-[11px] text-on-surface-variant mt-1">A {DIAS_GESTACION_BOVINA} días; puede ajustarla.</p>
+                        </div>
+                      </div>
+                    )}
+                    {preguntarPadre && (
+                      <BuscadorAnimal
+                        etiqueta="Toro que la preñó (si se sabe)"
+                        valor={form.toroId}
+                        alSeleccionar={(id) => setForm((f) => ({ ...f, toroId: id }))}
+                        sexo="MACHO"
+                        placeholder="Buscar toro por identificación o nombre..."
+                      />
+                    )}
+                    <p className="text-[11px] text-on-surface-variant">
+                      La gestación aparecerá en la pestaña <strong>Gestaciones</strong> con la cuenta regresiva hasta el parto.
+                    </p>
+                  </motion.div>
+                )}
+              </div>
             )}
 
             <div>

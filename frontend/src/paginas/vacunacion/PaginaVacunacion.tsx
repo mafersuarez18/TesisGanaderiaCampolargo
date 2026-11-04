@@ -838,11 +838,28 @@ export default function PaginaVacunacion() {
                 </div>
               </div>
             )}
-            <p className="text-[11px] text-on-surface-variant flex items-center gap-1.5 mt-3">
-              <Icono nombre="info" clase="text-[13px]" />
-              Cumplimiento = pares animal-calendario al día (sin vacuna vencida) sobre el total de pares aplicables en el lote.
-              Cada animal solo cuenta para los calendarios que le corresponden según su sexo, edad, propósito y condición reproductiva.
-            </p>
+            <div className="mt-3 rounded-2xl bg-surface-container-low px-4 py-3 text-[11px] text-on-surface-variant">
+              <p className="flex items-center gap-1.5 font-semibold text-on-surface mb-1.5">
+                <Icono nombre="info" clase="text-[14px]" /> Cómo leer el cuadro
+              </p>
+              <dl className="grid grid-cols-1 sm:grid-cols-[110px_1fr] gap-x-3 gap-y-1">
+                <dt className="font-semibold text-on-surface">Animales</dt>
+                <dd>Animales activos del lote.</dd>
+                <dt className="font-semibold text-on-surface">Al día</dt>
+                <dd>
+                  Protocolos cumplidos / protocolos que le corresponden al lote. Se suman los de cada animal: solo cuentan
+                  los que le aplican por sexo, edad, propósito y condición reproductiva. Uno está cumplido si su última
+                  aplicación no ha vencido. Las desparasitaciones cuentan como un solo protocolo, porque se rotan.
+                </dd>
+                <dt className="font-semibold text-on-surface">Cumplimiento</dt>
+                <dd className="flex flex-wrap items-center gap-1.5">
+                  Porcentaje de "Al día":
+                  <Badge variante="verde" tamano="xs">≥ 80 %</Badge> adecuado
+                  <Badge variante="amarillo" tamano="xs">50–79 %</Badge> atención
+                  <Badge variante="rojo" tamano="xs">&lt; 50 %</Badge> crítico
+                </dd>
+              </dl>
+            </div>
           </motion.div>
         ) : (
           <motion.div

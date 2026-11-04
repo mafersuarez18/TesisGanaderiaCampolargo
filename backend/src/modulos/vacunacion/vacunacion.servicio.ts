@@ -208,9 +208,15 @@ export async function registrarVacunacion(datos: DatosRegistroVacunacion) {
     },
   });
 
-  // Auto-resolver alertas de vacunación pendientes para este registro concreto
-  // El scheduler usa el RegistroVacunacion.id como entidadId
-  await resolverNotificacionesDeEntidad('RegistroVacunacion', registro.id).catch(() => {});
+  // Las alertas de vacuna próxima/vencida apuntan al registro anterior (el que
+  // vencía) de este animal y protocolo: aplicar la nueva dosis las resuelve.
+  const anteriores = await prisma.registroVacunacion.findMany({
+    where: { animalId, calendarioVacunacionId: datos.calendarioVacunacionId, id: { not: registro.id } },
+    select: { id: true },
+  });
+  await resolverNotificacionesDeEntidad(
+    'RegistroVacunacion', [registro.id, ...anteriores.map((r) => r.id)], aplicadoPorId,
+  ).catch(() => {});
 
   return registro;
 }
@@ -323,6 +329,13 @@ export async function obtenerCumplimientoVacunacionPorLote() {
 
   const hoy = new Date();
 
+  // Los protocolos de desparasitación son alternativas que se rotan (distinto
+  // principio activo), no dosis que se acumulan: cuentan como un único
+  // requisito, cumplido si cualquiera de los que le aplican al animal está
+  // vigente. El resto de protocolos cuenta cada uno por separado.
+  const requisito = (cal: { id: string; nombreVacuna: string }) =>
+    /^desparasitaci[oó]n/i.test(cal.nombreVacuna) ? 'desparasitacion' : cal.id;
+
   return lotes.map((lote) => {
     let paresEsperados = 0;
     let paresAlDia = 0;
@@ -333,13 +346,17 @@ export async function obtenerCumplimientoVacunacionPorLote() {
         gestante: gestantes.has(animal.id),
         ultimoParto: ultimoParto.get(animal.id) ?? null,
       };
+      const alDiaPorRequisito = new Map<string, boolean>();
       for (const cal of calendarios) {
         if (motivosNoAplica(cal, perfil, hoy).length) continue;
-        paresEsperados += 1;
         const proximaFecha = ultimaProximaFecha.get(`${animal.id}::${cal.id}`);
-        if (proximaFecha === undefined) continue; // nunca aplicado -> pendiente
-        if (proximaFecha === null || proximaFecha >= hoy) paresAlDia += 1;
+        // nunca aplicado -> pendiente; sin próxima fecha (dosis única) o aún no vencida -> al día
+        const alDia = proximaFecha !== undefined && (proximaFecha === null || proximaFecha >= hoy);
+        const clave = requisito(cal);
+        alDiaPorRequisito.set(clave, (alDiaPorRequisito.get(clave) ?? false) || alDia);
       }
+      paresEsperados += alDiaPorRequisito.size;
+      paresAlDia += [...alDiaPorRequisito.values()].filter(Boolean).length;
     }
 
     return {

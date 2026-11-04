@@ -5,6 +5,7 @@ import { clienteHttp } from '../../servicios/clienteAxios';
 import Modal from '../ui/Modal';
 import CampoFecha from '../ui/CampoFecha';
 import Icono from '../ui/Icono';
+import BuscadorAnimal from '../ui/BuscadorAnimal';
 import {
   DIAS_GESTACION_BOVINA, fechaLocalISO, isoMediodia, invalidarSeguimientoReproductivo,
 } from './seguimientoReproductivo';
@@ -19,6 +20,10 @@ export interface ServicioAConfirmar {
   descripcion: string;
   /** Fecha del servicio (ISO). Si se desconoce, el backend estima el parto desde el servicio. */
   fecha?: string;
+  /** Tipo de servicio; en una inseminación el padre es el semental y no se pregunta. */
+  tipo?: 'INSEMINACION_ARTIFICIAL' | 'MONTA_NATURAL';
+  /** Toro registrado en la monta, si se sabe (queda como padre). */
+  toro?: string | null;
 }
 
 export default function ModalConfirmarServicio({ servicio, prenadaInicial = true, alCerrar }: {
@@ -53,6 +58,9 @@ function Formulario({ servicio, prenadaInicial, alCerrar }: {
     servicio.fecha ? fechaLocalISO(new Date(servicio.fecha), DIAS_GESTACION_BOVINA) : '',
   );
   const [observaciones, setObservaciones] = useState('');
+  const [padreId, setPadreId] = useState('');
+  // Se pregunta el toro solo si no se sabe ya por el servicio
+  const preguntarPadre = servicio.tipo !== 'INSEMINACION_ARTIFICIAL' && !servicio.toro;
 
   const mutacion = useMutation({
     mutationFn: () => clienteHttp.patch(`/reproduccion/servicios/${servicio.id}/confirmar`, {
@@ -61,6 +69,7 @@ function Formulario({ servicio, prenadaInicial, alCerrar }: {
       ...(metodo && { metodoDiagnostico: metodo }),
       ...(prenada && fechaParto && { fechaPartoEsperado: isoMediodia(fechaParto) }),
       ...(observaciones.trim() && { observaciones: observaciones.trim() }),
+      ...(prenada && preguntarPadre && padreId && { padreId }),
     }, { descripcionOffline: 'Resultado de inseminación/monta' }),
     onSuccess: (r) => {
       invalidarSeguimientoReproductivo(qc);
@@ -124,6 +133,16 @@ function Formulario({ servicio, prenadaInicial, alCerrar }: {
             {fechaParto ? 'Estimado' : 'Si no la indicas, se estima'} a {DIAS_GESTACION_BOVINA} días del servicio.
             Cuando llegue la fecha recibirás una alerta para registrar cómo salió el parto.
           </p>
+          {servicio.toro && (
+            <p className="text-xs text-on-surface-variant mt-2">Padre: <strong className="text-on-surface">{servicio.toro}</strong> (toro de la monta)</p>
+          )}
+          {preguntarPadre && (
+            <div className="mt-3">
+              <BuscadorAnimal etiqueta="Toro que la preñó (si se sabe)" valor={padreId}
+                alSeleccionar={(id) => setPadreId(id)} sexo="MACHO"
+                placeholder="Buscar toro por identificación o nombre..." />
+            </div>
+          )}
         </div>
       ) : (
         <p className="text-xs text-on-surface-variant px-3 py-2.5 bg-surface-container rounded-xl">

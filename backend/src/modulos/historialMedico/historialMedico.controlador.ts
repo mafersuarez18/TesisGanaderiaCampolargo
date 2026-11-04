@@ -193,7 +193,7 @@ export async function controladorFinalizarTratamiento(
 ) {
   try {
     const datos = esquemaFinalizarTratamiento.parse(req.body);
-    const resultado = await finalizarTratamiento(req.params['id'] as string, datos);
+    const resultado = await finalizarTratamiento(req.params['id'] as string, datos, req.usuarioActual!.id);
     return respuestaExito(res, resultado);
   } catch (error) { return next(error); }
 }

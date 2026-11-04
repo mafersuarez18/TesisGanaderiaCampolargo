@@ -26,6 +26,8 @@ export interface CriaPorRegistrar {
       raza: { id: string; nombre: string };
       lote: { id: string; nombre: string; finca: { id: string; nombre: string } };
     };
+    // Toro que la preñó, si se registró en el diagnóstico o la monta
+    padre: { id: string; numeroIdentificacion: string; nombre: string | null } | null;
   };
 }
 

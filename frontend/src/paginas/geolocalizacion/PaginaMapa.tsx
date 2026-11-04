@@ -315,7 +315,9 @@ export default function PaginaMapa() {
 
   const enLinea    = dispositivos.filter(estaEnLinea).length;
   const activos    = dispositivos.filter((d) => d.estado !== 'INACTIVO').length;
-  const sinAsignar = dispositivos.filter((d) => !d.animalId).length;
+  // Todo collar está asignado a un animal (el esquema lo exige), así que en
+  // vez de "sin asignar" se cuentan los que necesitan revisión en campo.
+  const requierenAtencion = dispositivos.filter((d) => d.estado === 'BATERIA_BAJA' || d.estado === 'SIN_SEÑAL').length;
 
   const dispSeleccionado = dispositivos.find((d) => d.id === dispositivoTrackId) ?? null;
   const trackActivo      = movilidad?.puntos ?? [];
@@ -372,7 +374,7 @@ export default function PaginaMapa() {
           { et: 'Dispositivos totales', val: dispositivos.length, ico: 'router',       col: 'text-on-surface', fondo: 'bg-surface-container' },
           { et: 'Activos',              val: activos,              ico: 'check_circle',  col: 'text-primary',    fondo: 'bg-primary/10' },
           { et: 'En línea',             val: enLinea,              ico: 'wifi',          col: enLinea > 0 ? 'text-primary' : 'text-outline', fondo: enLinea > 0 ? 'bg-primary/10' : 'bg-surface-container' },
-          { et: 'Sin asignar',          val: sinAsignar,           ico: 'device_unknown', col: 'text-secondary', fondo: 'bg-secondary/10' },
+          { et: 'Requieren atención',   val: requierenAtencion,    ico: 'battery_alert', col: 'text-error',     fondo: 'bg-error-container' },
         ].map((kpi) => (
           <div key={kpi.et} className="tarjeta-vidrio rounded-2xl p-4 flex items-center gap-3">
             <div className={`p-2.5 ${kpi.fondo} rounded-xl flex-shrink-0`}>

@@ -92,6 +92,7 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
       throw new ErrorConflicto('Ese nacimiento no existe o su cría ya fue registrada');
     }
     datos.madreId = nacimiento.gestacion.madre.id;
+    datos.padreId ??= nacimiento.gestacion.padre?.id;
     datos.fechaNacimiento = nacimiento.fechaNacimiento;
   }
 

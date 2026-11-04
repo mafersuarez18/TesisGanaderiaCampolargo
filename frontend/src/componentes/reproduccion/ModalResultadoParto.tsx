@@ -33,7 +33,7 @@ export default function ModalResultadoParto({ gestacion, alCerrar }: {
     <Modal
       abierto={!!gestacion}
       alCerrar={alCerrar}
-      titulo="¿Cómo salió el parto?"
+      titulo="Resultado de la gestación"
       descripcion={gestacion?.descripcion}
     >
       {gestacion && <Formulario key={gestacion.id} gestacion={gestacion} alCerrar={alCerrar} />}
