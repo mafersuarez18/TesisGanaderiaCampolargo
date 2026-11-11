@@ -26,6 +26,7 @@ import enrutadorAuditoria from './modulos/auditoria/auditoria.rutas';
 import enrutadorAnalytics from './modulos/analytics/analytics.rutas';
 import enrutadorNotificaciones from './modulos/notificaciones/notificaciones.rutas';
 import enrutadorLotes from './modulos/lotes/lotes.rutas';
+import enrutadorPotreros from './modulos/potreros/potreros.rutas';
 import enrutadorPlanSanitario from './modulos/planSanitario/planSanitario.rutas';
 
 export function crearApp(): Application {
@@ -110,6 +111,7 @@ export function crearApp(): Application {
   app.use(`${baseApi}/analytics`, enrutadorAnalytics);
   app.use(`${baseApi}/notificaciones`, enrutadorNotificaciones);
   app.use(`${baseApi}/lotes`, enrutadorLotes);
+  app.use(`${baseApi}/potreros`, enrutadorPotreros);
   app.use(`${baseApi}/plan-sanitario`, enrutadorPlanSanitario);
 
   // ----- Manejadores globales -----

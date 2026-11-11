@@ -91,6 +91,8 @@ const RECURSO_ICONO: Record<string, string> = {
   ReglaAlerta:   'notifications',
   Finca:         'agriculture',
   Lote:          'grid_view',
+  Potrero:       'grass',
+  DispositivoGPS: 'router',
   default:       'inventory_2',
 };
 
@@ -111,6 +113,8 @@ const RECURSO_ETIQUETA: Record<string, string> = {
   Usuario: 'Usuario',
   Finca: 'Finca',
   Lote: 'Lote',
+  Potrero: 'Potrero',
+  DispositivoGPS: 'Collar GPS',
   Reporte: 'Reporte',
   Autenticacion: 'Sesión',
 };

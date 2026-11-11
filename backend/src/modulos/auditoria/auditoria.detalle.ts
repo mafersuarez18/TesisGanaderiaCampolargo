@@ -90,8 +90,8 @@ export async function describirRegistro(tipo: string | null, id: string | null):
         const u = await prisma.usuario.findUnique({ where: { id }, select: { nombre: true, apellido: true, correo: true } });
         return u ? { descripcion: `Usuario ${u.nombre} ${u.apellido} (${u.correo})`, eliminado: false } : null;
       }
-      case 'Finca': case 'Lote': case 'Semental': case 'Medicamento': case 'Raza': case 'Rol': case 'ReglaAlerta': {
-        const etiquetas: Record<string, string> = { Finca: 'Finca', Lote: 'Lote', Semental: 'Semental', Medicamento: 'Medicamento', Raza: 'Raza', Rol: 'Rol', ReglaAlerta: 'Regla de alerta' };
+      case 'Finca': case 'Lote': case 'Potrero': case 'Semental': case 'Medicamento': case 'Raza': case 'Rol': case 'ReglaAlerta': {
+        const etiquetas: Record<string, string> = { Finca: 'Finca', Lote: 'Lote', Potrero: 'Potrero', Semental: 'Semental', Medicamento: 'Medicamento', Raza: 'Raza', Rol: 'Rol', ReglaAlerta: 'Regla de alerta' };
         const modelo = (prisma as unknown as Record<string, { findUnique: (a: object) => Promise<{ nombre: string } | null> }>)[
           tipo.charAt(0).toLowerCase() + tipo.slice(1)
         ];

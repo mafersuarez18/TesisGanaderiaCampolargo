@@ -5,9 +5,10 @@ import { clienteHttp } from '../../servicios/clienteAxios';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Icono from '../../componentes/ui/Icono';
 import toast from 'react-hot-toast';
+import SeccionPotreros from './SeccionPotreros';
 
 // CRUD de lotes (agrupaciones de animales dentro de una finca), con
-// filtro por finca.
+// filtro por finca, y en otra pestaña el de sus potreros.
 interface Finca {
   id: string;
   nombre: string;
@@ -22,7 +23,7 @@ interface Lote {
   capacidad?: number;
   fincaId: string;
   finca: { nombre: string };
-  _count: { animales: number };
+  _count: { animales: number; potreros: number };
 }
 
 async function obtenerFincas(): Promise<{ datos: Finca[] }> {
@@ -56,6 +57,9 @@ export default function PaginaLotes() {
   const [loteEliminar, setLoteEliminar] = useState<Lote | null>(null);
   const [form, setForm] = useState<FormLote>(formVacio);
   const [loteDetalle, setLoteDetalle] = useState<Lote | null>(null);
+  const [pestana, setPestana] = useState<'lotes' | 'potreros'>('lotes');
+  // Lote a mostrar al pasar a Potreros desde la tarjeta de un lote
+  const [lotePotreros, setLotePotreros] = useState<string | undefined>(undefined);
 
   const { data: fincasData, isLoading: cargandoFincas } = useQuery({
     queryKey: ['fincas'],
@@ -171,6 +175,35 @@ export default function PaginaLotes() {
         ))}
       </div>
 
+      {/* Pestañas */}
+      <div className="flex gap-1 p-1 bg-surface-container rounded-xl w-fit max-w-full overflow-x-auto">
+        {([
+          { clave: 'lotes', et: 'Lotes', ico: 'grid_view' },
+          { clave: 'potreros', et: 'Potreros', ico: 'grass' },
+        ] as const).map((p) => (
+          <button
+            key={p.clave}
+            onClick={() => { setPestana(p.clave); if (p.clave === 'potreros') setLotePotreros(undefined); }}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              pestana === p.clave ? 'bg-surface-container-lowest text-on-surface shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            <Icono nombre={p.ico} clase="text-[16px]" />
+            {p.et}
+          </button>
+        ))}
+      </div>
+
+      {pestana === 'potreros' && (
+        <SeccionPotreros
+          fincas={fincas}
+          puedeEditar={puedeEditar}
+          puedeEliminar={esAdministrador}
+          loteInicial={lotePotreros}
+        />
+      )}
+
+      {pestana === 'lotes' && (<>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -304,11 +337,22 @@ export default function PaginaLotes() {
                     </span>
                   </div>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => { setLotePotreros(lote.id); setPestana('potreros'); }}
+                  className="flex items-center gap-1.5 text-xs font-medium text-primary hover:underline w-fit"
+                >
+                  <Icono nombre="grass" clase="text-[14px]" />
+                  {lote._count.potreros} {lote._count.potreros === 1 ? 'potrero' : 'potreros'} · Ver y gestionar
+                </button>
               </motion.div>
             );
           })}
         </div>
       )}
+
+      </>)}
 
       {/* Modal crear/editar */}
       <AnimatePresence>

@@ -39,7 +39,7 @@ enrutador.get('/', requerirPrivilegio('lotes.ver'), async (req: Request, res: Re
       },
       include: {
         finca: { select: { nombre: true } },
-        _count: { select: { animales: true } },
+        _count: { select: { animales: true, potreros: true } },
       },
       orderBy: [{ finca: { nombre: 'asc' } }, { nombre: 'asc' }],
     });
@@ -181,7 +181,11 @@ enrutador.delete(
         throw new ErrorConflicto(`No se puede eliminar el lote porque tiene ${lote._count.animales} animal(es) asignado(s)`);
       }
 
-      await prisma.lote.delete({ where: { id: req.params['id'] as string } });
+      // Sin animales, sus potreros quedan vacíos y se eliminan con él
+      await prisma.$transaction([
+        prisma.potrero.deleteMany({ where: { loteId: req.params['id'] as string } }),
+        prisma.lote.delete({ where: { id: req.params['id'] as string } }),
+      ]);
       return respuestaSinContenido(res);
     } catch (error) { return next(error); }
   }
