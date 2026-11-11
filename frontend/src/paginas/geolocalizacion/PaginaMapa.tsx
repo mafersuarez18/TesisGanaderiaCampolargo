@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 import { clienteHttp } from '../../servicios/clienteAxios';
 import Badge from '../../componentes/ui/Badge';
 import Icono from '../../componentes/ui/Icono';
+import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 
 // ── Fix icono default de Leaflet en Vite ─────────────────────────────────────
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -81,6 +82,26 @@ interface Movilidad {
   puntos: PuntoMovilidad[];
 }
 
+interface NuevoDispositivo {
+  codigoDispositivo: string;
+  animalId: string;
+  fabricante?: string;
+  modelo?: string;
+  frecuenciaMinutos: number;
+}
+
+// Cada cuánto envía posición el collar (lo define el modo configurado en el equipo)
+const OPCIONES_FRECUENCIA = [
+  { min: 15, et: 'Cada 15 minutos' },
+  { min: 30, et: 'Cada 30 minutos' },
+  { min: 60, et: 'Cada hora' },
+  { min: 120, et: 'Cada 2 horas' },
+  { min: 240, et: 'Cada 4 horas' },
+  { min: 360, et: 'Cada 6 horas' },
+  { min: 720, et: 'Cada 12 horas' },
+  { min: 1440, et: 'Una vez al día' },
+];
+
 interface ResultadoImportacion {
   filasProcesadas: number;
   registrosImportados: number;
@@ -98,8 +119,23 @@ const api = {
     clienteHttp.get('/geolocalizacion/animales', {
       params: { ...(fincaId && { fincaId }), ...(loteId && { loteId }) },
     }).then((r) => r.data.datos ?? []),
-  movilidad:     (animalId: string) =>
-    clienteHttp.get(`/geolocalizacion/movilidad/${animalId}`).then((r) => r.data.datos),
+  movilidad:     (animalId: string, desde?: string, hasta?: string) =>
+    clienteHttp.get(`/geolocalizacion/movilidad/${animalId}`, {
+      params: {
+        // Días completos en hora local; con rango se traen más posiciones
+        ...(desde && { desde: new Date(`${desde}T00:00:00`).toISOString() }),
+        ...(hasta && { hasta: new Date(`${hasta}T23:59:59.999`).toISOString() }),
+        limite: desde || hasta ? 1000 : 200,
+      },
+    }).then((r) => r.data.datos),
+  // PDF imprimible del reporte de movilidad (mismo rango que en pantalla)
+  pdfMovilidad:  (animalId: string, desde?: string, hasta?: string): Promise<Blob> =>
+    clienteHttp.get(`/geolocalizacion/movilidad/${animalId}/pdf`, {
+      params: { ...(desde && { desde }), ...(hasta && { hasta }) },
+      responseType: 'blob',
+    }).then((r) => r.data),
+  crearDispositivo: (datos: NuevoDispositivo): Promise<DispositivoGPS> =>
+    clienteHttp.post('/geolocalizacion/dispositivos', datos, { sinCola: true }).then((r) => r.data.datos),
   importarReporte: (dispositivoId: string, archivo: File): Promise<ResultadoImportacion> => {
     const form = new FormData();
     form.append('archivo', archivo);
@@ -203,6 +239,9 @@ export default function PaginaMapa() {
   const [fincaVistaId, setFincaVistaId] = useState<string>('');
   const [dispositivoTrackId, setDispositivoTrackId] = useState<string>('');
   const [dispositivoParaImportar, setDispositivoParaImportar] = useState<string | null>(null);
+  const [desdeMov, setDesdeMov] = useState('');
+  const [hastaMov, setHastaMov] = useState('');
+  const [generandoPdf, setGenerandoPdf] = useState(false);
   const inputArchivoRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -231,6 +270,34 @@ export default function PaginaMapa() {
     },
     onSettled: () => setDispositivoParaImportar(null),
   });
+
+  // Abre el PDF en una pestaña nueva para imprimirlo; la pestaña se abre
+  // antes de la descarga para que el navegador no la bloquee como ventana
+  // emergente. Si aun así se bloquea, se descarga el archivo.
+  async function imprimirReporteMovilidad() {
+    const animalId = dispSeleccionado?.animalId;
+    if (!animalId) return;
+    const ventana = window.open('', '_blank');
+    setGenerandoPdf(true);
+    try {
+      const blob = await api.pdfMovilidad(animalId, desdeMov || undefined, hastaMov || undefined);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      if (ventana) {
+        ventana.location.href = url;
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `movilidad_${dispSeleccionado?.animal?.numeroIdentificacion ?? animalId}.pdf`;
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      ventana?.close();
+      toast.error('No se pudo generar el reporte de movilidad');
+    } finally {
+      setGenerandoPdf(false);
+    }
+  }
 
   function abrirSelectorArchivo(dispositivoId: string) {
     setDispositivoParaImportar(dispositivoId);
@@ -261,10 +328,10 @@ export default function PaginaMapa() {
     refetchInterval: 60_000,
   });
   const { data: movilidad, isLoading: cargandoMovilidad } = useQuery<Movilidad>({
-    queryKey: ['geo-movilidad', dispositivoTrackId],
+    queryKey: ['geo-movilidad', dispositivoTrackId, desdeMov, hastaMov],
     queryFn: () => {
       const animalId = dispositivos.find((d) => d.id === dispositivoTrackId)?.animalId;
-      return api.movilidad(animalId!);
+      return api.movilidad(animalId!, desdeMov || undefined, hastaMov || undefined);
     },
     enabled: pestaña === 'movilidad' && !!dispositivos.find((d) => d.id === dispositivoTrackId)?.animalId,
   });
@@ -358,12 +425,13 @@ export default function PaginaMapa() {
         className="flex items-start gap-3 px-4 py-3.5 bg-tertiary/8 border border-tertiary/20 rounded-2xl">
         <Icono nombre="science" relleno clase="text-[18px] text-tertiary flex-shrink-0 mt-0.5" />
         <div className="text-sm">
-          <span className="font-semibold text-on-surface">Módulo listo para hardware real — </span>
+          <span className="font-semibold text-on-surface">Datos de prueba — </span>
           <span className="text-on-surface-variant">
-            Dispositivos, posiciones y reportes de movilidad se calculan aquí a partir de la base de datos,
-            exactamente igual que con un collar satelital real. Las posiciones que ves ahora son datos de prueba
-            generados por el sistema; en cuanto los collares queden en campo, sus reportes (CSV/XLS) se suben con
-            el botón "Importar reporte" de cada dispositivo y reemplazan a los simulados sin ningún cambio adicional.
+            Las posiciones que se ven ahora fueron generadas por el sistema para demostración. Cuando los collares
+            estén en campo, el reporte que se descarga de la plataforma del fabricante (CSV o Excel) se carga con el
+            botón <strong className="text-on-surface">Importar reporte</strong> de cada dispositivo (pestaña
+            Dispositivos GPS), y el mapa, la vista por finca y el historial de movilidad se calculan con esas
+            posiciones reales.
           </span>
         </div>
       </motion.div>
@@ -509,6 +577,22 @@ export default function PaginaMapa() {
                         )}
                       </div>
 
+                      <button
+                        onClick={(e) => { e.stopPropagation(); abrirSelectorArchivo(disp.id); }}
+                        disabled={mutacionImportar.isPending && dispositivoParaImportar === disp.id}
+                        title="Cargar el reporte CSV/Excel descargado de la plataforma del collar"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium flex-shrink-0
+                                   bg-secondary/10 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-50"
+                      >
+                        <Icono
+                          nombre={mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'progress_activity' : 'upload_file'}
+                          clase={`text-[16px] ${mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'animate-spin' : ''}`}
+                        />
+                        <span className="hidden sm:inline">
+                          {mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'Importando…' : 'Importar reporte'}
+                        </span>
+                      </button>
+
                       <Icono nombre={ampliado ? 'expand_less' : 'chevron_right'} clase="text-[18px] text-outline flex-shrink-0" />
                     </div>
 
@@ -529,7 +613,9 @@ export default function PaginaMapa() {
                               <InfoBloque titulo="Última señal" valor={tiempoRelativo(disp.ultimaConexion)} />
                             </div>
                             <div className="text-xs text-on-surface-variant bg-surface-container rounded-xl px-3 py-2 font-mono leading-relaxed">
-                              <p className="text-outline text-[10px] font-sans mb-1">Endpoint de envío (HTTP POST):</p>
+                              <p className="text-outline text-[10px] font-sans mb-1">
+                                Solo si el fabricante permite envío automático a otros sistemas (HTTP POST):
+                              </p>
                               <p className="break-all">{`POST /api/geolocalizacion/dispositivos/${disp.apiKey}/ubicacion`}</p>
                               <p className="mt-1 text-outline font-sans text-[10px]">Body: {'{ "latitud": 10.1875, "longitud": -68.5234, "precision": 3.5, "velocidad": 0.8 }'}</p>
                             </div>
@@ -543,14 +629,6 @@ export default function PaginaMapa() {
                                   Ver historial de movilidad
                                 </button>
                               )}
-                              <button
-                                onClick={(e) => { e.stopPropagation(); abrirSelectorArchivo(disp.id); }}
-                                disabled={mutacionImportar.isPending && dispositivoParaImportar === disp.id}
-                                className="flex items-center gap-1.5 text-xs font-medium text-secondary hover:underline disabled:opacity-50"
-                              >
-                                <Icono nombre={mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'progress_activity' : 'upload_file'} clase="text-[14px]" />
-                                {mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'Importando…' : 'Importar reporte (CSV/XLS)'}
-                              </button>
                             </div>
                           </div>
                         </motion.div>
@@ -965,6 +1043,38 @@ export default function PaginaMapa() {
                 <p className="text-xs text-on-surface-variant italic">Ningún dispositivo tiene un animal asignado todavía</p>
               )}
             </div>
+
+            {/* Período del reporte e impresión */}
+            <div className="mt-4 pt-4 border-t border-outline-variant/20 flex items-end gap-3 flex-wrap">
+              <label className="text-xs text-on-surface-variant">
+                <span className="block font-medium mb-1">Desde</span>
+                <input type="date" value={desdeMov} max={hastaMov || undefined}
+                  onChange={(e) => setDesdeMov(e.target.value)} className="campo-entrada text-xs py-1.5 w-auto" />
+              </label>
+              <label className="text-xs text-on-surface-variant">
+                <span className="block font-medium mb-1">Hasta</span>
+                <input type="date" value={hastaMov} min={desdeMov || undefined}
+                  onChange={(e) => setHastaMov(e.target.value)} className="campo-entrada text-xs py-1.5 w-auto" />
+              </label>
+              {(desdeMov || hastaMov) && (
+                <button onClick={() => { setDesdeMov(''); setHastaMov(''); }}
+                  className="text-xs text-on-surface-variant hover:text-primary underline py-2">
+                  Quitar fechas
+                </button>
+              )}
+              <button
+                onClick={imprimirReporteMovilidad}
+                disabled={!dispSeleccionado?.animalId || generandoPdf}
+                className="boton boton-primario gap-2 text-sm ml-auto disabled:opacity-50"
+              >
+                <Icono nombre={generandoPdf ? 'progress_activity' : 'print'} clase={`text-[18px] ${generandoPdf ? 'animate-spin' : ''}`} />
+                {generandoPdf ? 'Generando…' : 'Imprimir reporte'}
+              </button>
+              <p className="basis-full text-[11px] text-on-surface-variant">
+                Sin fechas se muestran las últimas 200 posiciones. El reporte (PDF) incluye el resumen del recorrido,
+                la movilidad por día y el registro de posiciones del período elegido.
+              </p>
+            </div>
           </div>
 
           {cargandoMovilidad ? (
@@ -1132,7 +1242,11 @@ export default function PaginaMapa() {
             <div className="tarjeta-vidrio rounded-2xl p-12 text-center">
               <Icono nombre="route" clase="text-[40px] text-outline mx-auto mb-3" />
               <p className="font-medium text-on-surface-variant">Sin historial disponible</p>
-              <p className="text-sm text-outline mt-1">Seleccione un dispositivo con animal asignado para ver su trayectoria</p>
+              <p className="text-sm text-outline mt-1">
+                {desdeMov || hastaMov
+                  ? 'No hay posiciones de este animal en el período elegido'
+                  : 'Seleccione un dispositivo con animal asignado para ver su trayectoria'}
+              </p>
             </div>
           )}
 
@@ -1142,81 +1256,15 @@ export default function PaginaMapa() {
       {/* ── MODAL: Agregar dispositivo ───────────────────────────────────────── */}
       <AnimatePresence>
         {modalConfig && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm"
-              onClick={() => setModalConfig(false)}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 16 }}
-              transition={{ duration: 0.2 }}
-              className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-outline-variant/20">
-                <div>
-                  <h2 className="text-base font-semibold text-on-surface">Configurar collar GPS satelital</h2>
-                  <p className="text-sm text-on-surface-variant mt-0.5">Puesta en marcha de un dispositivo de localización</p>
-                </div>
-                <button onClick={() => setModalConfig(false)} className="p-2 hover:bg-surface-container rounded-xl transition-colors -mt-1 -mr-2">
-                  <Icono nombre="close" clase="text-[18px] text-on-surface-variant" />
-                </button>
-              </div>
-
-              <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
-                <Paso numero={1} titulo="Colocar el collar y asignarlo en el sistema">
-                  <p className="text-sm text-on-surface-variant">
-                    El collar se coloca en el animal siguiendo las indicaciones del fabricante (ajuste regulable,
-                    panel solar hacia arriba). Luego, en <strong className="text-on-surface">Seguridad → Dispositivos GPS</strong>,
-                    se crea el registro asociándolo a ese animal — con esto queda listo para recibir posiciones.
-                  </p>
-                </Paso>
-                <Paso numero={2} titulo="El collar reporta directamente por satélite">
-                  <p className="text-sm text-on-surface-variant">
-                    Es un dispositivo autónomo: no se programa ni se apunta a ningún servidor propio. Envía su
-                    posición por comunicación satelital según el modo de temporización configurado en fábrica
-                    (los modelos con esta tecnología ofrecen hasta 13 modos, de mayor frecuencia a mayor ahorro
-                    de batería), y se recarga solo mediante su panel solar integrado.
-                  </p>
-                </Paso>
-                <Paso numero={3} titulo="Traer el reporte a Campolargo">
-                  <p className="text-sm text-on-surface-variant mb-2">
-                    Los datos del collar se descargan desde la interfaz web del fabricante en formato
-                    <strong className="text-on-surface"> CSV o Excel</strong>. Ese archivo se sube en la ficha del
-                    dispositivo (botón <strong className="text-on-surface">"Importar reporte"</strong>, en la pestaña
-                    Dispositivos GPS): el sistema reconoce automáticamente las columnas de fecha, latitud, longitud
-                    y velocidad, sin importar el idioma del encabezado.
-                  </p>
-                </Paso>
-                <Paso numero={4} titulo="Verificar la importación">
-                  <p className="text-sm text-on-surface-variant">
-                    Al terminar de importar, el dispositivo pasa a
-                    <Badge variante="verde" tamano="xs" punto className="mx-1">En línea</Badge>
-                    y sus posiciones aparecen de inmediato en el mapa y en el historial de movilidad, igual que si
-                    hubieran llegado en tiempo real.
-                  </p>
-                </Paso>
-                <div className="flex items-start gap-2 text-xs text-on-surface-variant bg-surface-container/60 rounded-xl p-3">
-                  <Icono nombre="info" clase="text-[14px] text-primary flex-shrink-0 mt-0.5" />
-                  <p>
-                    Si el proveedor del collar habilita en el futuro un envío automático (webhook/API) hacia
-                    terceros, el sistema también acepta esa vía sin cambios: cada dispositivo tiene su propia
-                    clave para recibir posiciones en tiempo real en
-                    <code className="mx-1 px-1 py-0.5 bg-surface-container rounded text-[10px]">
-                      /geolocalizacion/dispositivos/{'{apiKey}'}/ubicacion
-                    </code>.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex justify-end px-6 py-4 border-t border-outline-variant/20 bg-surface-container-low">
-                <button onClick={() => setModalConfig(false)} className="boton boton-primario">Entendido</button>
-              </div>
-            </motion.div>
-          </div>
+          <ModalNuevoDispositivo
+            alCerrar={() => setModalConfig(false)}
+            alCrear={(nuevo) => {
+              queryClient.invalidateQueries({ queryKey: ['geo-dispositivos'] });
+              setModalConfig(false);
+              setPestaña('dispositivos');
+              setDispositivoAmp(nuevo.id);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>
@@ -1224,6 +1272,158 @@ export default function PaginaMapa() {
 }
 
 // ── Sub-componentes ───────────────────────────────────────────────────────────
+function ModalNuevoDispositivo({ alCerrar, alCrear }: {
+  alCerrar: () => void;
+  alCrear: (dispositivo: DispositivoGPS) => void;
+}) {
+  const [datos, setDatos] = useState<NuevoDispositivo>({ codigoDispositivo: '', animalId: '', frecuenciaMinutos: 60 });
+  const [verGuia, setVerGuia] = useState(false);
+  const mutacion = useMutation({
+    mutationFn: () => api.crearDispositivo({
+      ...datos,
+      fabricante: datos.fabricante?.trim() || undefined,
+      modelo: datos.modelo?.trim() || undefined,
+    }),
+    onSuccess: (nuevo) => {
+      toast.success(`Collar ${nuevo.codigoDispositivo} registrado`);
+      alCrear(nuevo);
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.mensaje ?? 'No se pudo registrar el dispositivo'),
+  });
+  const valido = datos.codigoDispositivo.trim().length >= 2 && !!datos.animalId;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm"
+        onClick={alCerrar}
+      />
+      <motion.form
+        initial={{ opacity: 0, scale: 0.96, y: 16 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.96, y: 16 }}
+        transition={{ duration: 0.2 }}
+        className="relative w-full max-w-lg bg-surface-container-lowest rounded-2xl shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => { e.preventDefault(); if (valido) mutacion.mutate(); }}
+      >
+        <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-outline-variant/20">
+          <div>
+            <h2 className="text-base font-semibold text-on-surface">Agregar collar GPS</h2>
+            <p className="text-sm text-on-surface-variant mt-0.5">Registrar el collar y asignarlo al animal que lo lleva</p>
+          </div>
+          <button type="button" onClick={alCerrar} className="p-2 hover:bg-surface-container rounded-xl transition-colors -mt-1 -mr-2">
+            <Icono nombre="close" clase="text-[18px] text-on-surface-variant" />
+          </button>
+        </div>
+
+        <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+          <div>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Código / N.° de serie del collar *</label>
+            <input
+              value={datos.codigoDispositivo}
+              onChange={(e) => setDatos({ ...datos, codigoDispositivo: e.target.value })}
+              placeholder="Ej. GPS-012 o el número impreso en el collar"
+              className="campo-entrada"
+              autoFocus
+            />
+            <p className="text-[11px] text-on-surface-variant mt-1">Use el mismo identificador que aparece en la plataforma del fabricante.</p>
+          </div>
+
+          <BuscadorAnimal
+            valor={datos.animalId}
+            alSeleccionar={(id) => setDatos({ ...datos, animalId: id })}
+            etiqueta="Animal que lleva el collar"
+            requerido
+            placeholder="Escriba el nombre o la identificación..."
+          />
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Fabricante</label>
+              <input value={datos.fabricante ?? ''} onChange={(e) => setDatos({ ...datos, fabricante: e.target.value })}
+                placeholder="Ej. Digitanimal" className="campo-entrada" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Modelo</label>
+              <input value={datos.modelo ?? ''} onChange={(e) => setDatos({ ...datos, modelo: e.target.value })}
+                placeholder="Ej. SAT" className="campo-entrada" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-on-surface-variant mb-1.5">Frecuencia de reporte</label>
+            <select value={datos.frecuenciaMinutos}
+              onChange={(e) => setDatos({ ...datos, frecuenciaMinutos: Number(e.target.value) })}
+              className="campo-entrada">
+              {OPCIONES_FRECUENCIA.map((o) => <option key={o.min} value={o.min}>{o.et}</option>)}
+            </select>
+            <p className="text-[11px] text-on-surface-variant mt-1">
+              Cada cuánto envía su posición, según el modo configurado en el collar. Se usa para saber si está
+              "En línea": lo está si su última posición llegó dentro del doble de este tiempo.
+            </p>
+          </div>
+
+          {/* Guía de uso */}
+          <div className="rounded-xl bg-surface-container/60">
+            <button type="button" onClick={() => setVerGuia(!verGuia)}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-semibold text-on-surface">
+              <Icono nombre="help" clase="text-[16px] text-primary" />
+              ¿Cómo llegan las posiciones del collar al sistema?
+              <Icono nombre={verGuia ? 'expand_less' : 'expand_more'} clase="text-[16px] ml-auto text-on-surface-variant" />
+            </button>
+            {verGuia && (
+              <div className="px-3 pb-3 space-y-3">
+                <Paso numero={1} titulo="Registrar el collar (este formulario)">
+                  <p className="text-xs text-on-surface-variant">
+                    Se coloca el collar en el animal según las indicaciones del fabricante y se registra aquí,
+                    asociado a ese animal. Queda como "Sin señal" hasta que lleguen sus primeras posiciones.
+                  </p>
+                </Paso>
+                <Paso numero={2} titulo="El collar envía su posición al fabricante">
+                  <p className="text-xs text-on-surface-variant">
+                    Los collares satelitales no se conectan directo a este sistema: envían su posición por satélite
+                    a la plataforma web del fabricante, con la frecuencia del modo configurado, y se recargan con su
+                    panel solar.
+                  </p>
+                </Paso>
+                <Paso numero={3} titulo="Descargar el reporte e importarlo">
+                  <p className="text-xs text-on-surface-variant">
+                    Desde la plataforma del fabricante se descarga el reporte en CSV o Excel. En la pestaña
+                    Dispositivos GPS, el botón <strong className="text-on-surface">Importar reporte</strong> de la
+                    fila del collar carga ese archivo; el sistema reconoce solo las columnas de fecha, latitud,
+                    longitud y velocidad (en español o inglés).
+                  </p>
+                </Paso>
+                <Paso numero={4} titulo="Revisar el resultado">
+                  <p className="text-xs text-on-surface-variant">
+                    Las posiciones aparecen en el mapa y en el historial de movilidad, y la "última señal" del collar
+                    pasa a ser la fecha de la última posición del archivo. Se ve "En línea" si esa posición es reciente.
+                  </p>
+                </Paso>
+                <p className="text-[11px] text-on-surface-variant">
+                  Si el fabricante permite enviar las posiciones automáticamente a otro sistema, cada collar tiene su
+                  propia clave (API Key, visible al desplegar la fila) para recibirlas en tiempo real sin importar archivos.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-outline-variant/20 bg-surface-container-low">
+          <button type="button" onClick={alCerrar} className="boton boton-secundario">Cancelar</button>
+          <button type="submit" disabled={!valido || mutacion.isPending} className="boton boton-primario gap-2 disabled:opacity-50">
+            <Icono nombre={mutacion.isPending ? 'progress_activity' : 'save'} clase={`text-[16px] ${mutacion.isPending ? 'animate-spin' : ''}`} />
+            {mutacion.isPending ? 'Guardando…' : 'Registrar collar'}
+          </button>
+        </div>
+      </motion.form>
+    </div>
+  );
+}
+
 function InfoBloque({ titulo, valor, mono }: { titulo: string; valor: string; mono?: boolean }) {
   return (
     <div>

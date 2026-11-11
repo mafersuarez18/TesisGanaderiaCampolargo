@@ -39,7 +39,9 @@ export function registrarAuditoria(
     }
 
     const accion = obtenerTipoAccion(req.method);
-    const modulo = extraerModulo(req.path);
+    // req.path es relativo al enrutador del módulo ("/:id"); el prefijo
+    // "/api/animales" está en baseUrl.
+    const modulo = extraerModulo(`${req.baseUrl}${req.path}`);
     const usuarioId = req.usuarioActual?.id;
 
     // Se copia el body de entrada para dejar constancia de qué se envió,
@@ -53,8 +55,12 @@ export function registrarAuditoria(
     const respuestaOriginal = res.json.bind(res);
     let exitosa = true;
     let errorMensaje: string | undefined;
+    let idCreado: string | undefined;
 
     res.json = function (cuerpo: unknown) {
+      // Al crear, el id del registro nuevo viene en la respuesta ({ datos: { id } })
+      const datos = cuerpo && typeof cuerpo === 'object' ? (cuerpo as { datos?: { id?: unknown } }).datos : undefined;
+      if (datos && typeof datos.id === 'string') idCreado = datos.id;
       if (res.statusCode >= 400) {
         exitosa = false;
         if (cuerpo && typeof cuerpo === 'object' && 'mensaje' in cuerpo) {
@@ -75,7 +81,7 @@ export function registrarAuditoria(
           modulo,
           descripcion,
           entidadTipo,
-          entidadId: req.params['id'] as string,
+          entidadId: (req.params['id'] as string | undefined) ?? (exitosa ? idCreado : undefined),
           datosNuevos: datosEntrada as object,
           direccionIP: req.ip ?? req.socket.remoteAddress,
           agenteUsuario: req.headers['user-agent'],

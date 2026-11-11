@@ -139,6 +139,7 @@ const esquemaObservacion = z.object({
 
 const esquemaFiltros = z.object({
   animalId:  z.string().min(1).optional(),
+  busqueda:  z.string().trim().min(1).optional(),
   fincaId:   z.string().min(1).optional(),
   desde:     z.coerce.date().optional(),
   hasta:     z.coerce.date().optional(),

@@ -1,6 +1,6 @@
 import { Prisma, TipoEventoReproductivo, EstadoGestacion, EstadoAnimal, Sexo, ClasificacionIA, TecnicaDeposicionSemen, NivelEstres, TipoParto, EstadoCria } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { ErrorNoEncontrado, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
+import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 import { resolverNotificacionesDeEntidad } from '../notificaciones/notificaciones.servicio';
 
 // Ciclo reproductivo completo: eventos (celo, monta, inseminación,
@@ -19,6 +19,107 @@ const TIPOS_SERVICIO: TipoEventoReproductivo[] = [
   TipoEventoReproductivo.INSEMINACION_ARTIFICIAL,
   TipoEventoReproductivo.MONTA_NATURAL,
 ];
+
+// ─── Situación reproductiva antes de un servicio o celo ──────────────────────
+// Una hembra no se puede inseminar, servir con monta ni registrarle un celo
+// mientras esté preñada o mientras su último servicio siga sin confirmar. En
+// esos casos se responde un conflicto con los datos del caso para que la
+// pantalla pregunte "¿quedó preñada?": si sigue preñada no se registra nada;
+// si está vacía, se reenvía con resolucionPrevia = 'VACIA' y aquí se cierra
+// lo pendiente (diagnóstico negativo del servicio, o la gestación como
+// perdida) antes de registrar lo nuevo.
+
+export type ResolucionPrevia = 'VACIA';
+
+const TIPOS_QUE_REQUIEREN_VACIA: TipoEventoReproductivo[] = [
+  TipoEventoReproductivo.INSEMINACION_ARTIFICIAL,
+  TipoEventoReproductivo.MONTA_NATURAL,
+  TipoEventoReproductivo.DETECCION_CELO,
+];
+
+const fmtFecha = (d: Date) => d.toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+export async function verificarSituacionReproductiva(
+  animalId: string,
+  tipo: TipoEventoReproductivo,
+  fecha: Date,
+  registradoPorId: string,
+  resolucion?: ResolucionPrevia,
+) {
+  if (!TIPOS_QUE_REQUIEREN_VACIA.includes(tipo)) return;
+
+  const animal = await prisma.animal.findUnique({
+    where: { id: animalId },
+    select: { id: true, numeroIdentificacion: true, nombre: true, sexo: true, estado: true },
+  });
+  if (!animal) throw new ErrorNoEncontrado('Animal');
+  const nombre = animal.nombre ? `${animal.nombre} (#${animal.numeroIdentificacion})` : `#${animal.numeroIdentificacion}`;
+  if (animal.sexo !== Sexo.HEMBRA) throw new ErrorValidacionDatos(`${nombre} es macho: este registro solo aplica a hembras`);
+  if (animal.estado !== EstadoAnimal.ACTIVO) {
+    throw new ErrorValidacionDatos(`${nombre} no está activa (estado: ${animal.estado.toLowerCase()})`);
+  }
+  if (fecha.getTime() > Date.now() + MS_DIA) throw new ErrorValidacionDatos('La fecha no puede ser futura');
+
+  const queSeRegistra = tipo === TipoEventoReproductivo.INSEMINACION_ARTIFICIAL ? 'inseminarla'
+    : tipo === TipoEventoReproductivo.MONTA_NATURAL ? 'registrarle una monta natural' : 'registrarle un celo';
+  const hoy = Date.now();
+
+  const gestacion = await prisma.gestacion.findFirst({
+    where: { madreId: animalId, estadoGestacion: EstadoGestacion.EN_CURSO },
+    select: { id: true, fechaInicio: true, fechaPartoEsperado: true, eventoReproductivo: { select: { tipo: true } } },
+  });
+  if (gestacion) {
+    if (resolucion !== 'VACIA') {
+      const dias = Math.floor((hoy - gestacion.fechaInicio.getTime()) / MS_DIA);
+      throw new ErrorConflicto(
+        `${nombre} tiene una gestación en curso (${dias} días, parto esperado el ${fmtFecha(gestacion.fechaPartoEsperado)}). `
+          + `No se puede ${queSeRegistra} mientras esté preñada.`,
+        {
+          codigo: 'GESTACION_EN_CURSO',
+          animal: { id: animal.id, nombre },
+          gestacion: {
+            id: gestacion.id,
+            fechaInicio: gestacion.fechaInicio,
+            fechaPartoEsperado: gestacion.fechaPartoEsperado,
+            dias,
+            origen: gestacion.eventoReproductivo?.tipo ?? null,
+          },
+        },
+      );
+    }
+    if (fecha < gestacion.fechaInicio) {
+      throw new ErrorValidacionDatos(`La fecha no puede ser anterior al inicio de la gestación (${fmtFecha(gestacion.fechaInicio)})`);
+    }
+    // Está vacía: la gestación se perdió (o el diagnóstico fue errado)
+    await cerrarGestacion(gestacion.id, 'PERDIDA', fecha, undefined, registradoPorId);
+    return;
+  }
+
+  const pendiente = (await listarServiciosPorConfirmar()).find((s) => s.animal.id === animalId);
+  if (pendiente) {
+    if (fecha < pendiente.fecha) {
+      throw new ErrorValidacionDatos(`La fecha no puede ser anterior a su último servicio (${fmtFecha(pendiente.fecha)})`);
+    }
+    if (resolucion !== 'VACIA') {
+      const dias = Math.floor((hoy - pendiente.fecha.getTime()) / MS_DIA);
+      const servicio = pendiente.tipo === TipoEventoReproductivo.INSEMINACION_ARTIFICIAL ? 'se inseminó' : 'tuvo monta natural';
+      throw new ErrorConflicto(
+        `${nombre} ${servicio} hace ${dias} ${dias === 1 ? 'día' : 'días'} (${fmtFecha(pendiente.fecha)}) y aún no se confirma si quedó preñada.`,
+        {
+          codigo: 'SERVICIO_PENDIENTE',
+          animal: { id: animal.id, nombre },
+          servicio: { id: pendiente.id, tipo: pendiente.tipo, fecha: pendiente.fecha, dias },
+        },
+      );
+    }
+    const nuevo = tipo === TipoEventoReproductivo.DETECCION_CELO ? 'un nuevo celo' : 'un nuevo servicio';
+    await confirmarServicio(pendiente.id, {
+      prenada: false,
+      fechaDiagnostico: fecha,
+      observaciones: `Vacía: se registró ${nuevo}`,
+    }, registradoPorId);
+  }
+}
 
 // ─── Partos próximos ────────────────────────────────────────────────────────
 
@@ -86,6 +187,8 @@ export async function listarPartosProximos(diasHorizonte: number = 30, limite: n
       clasificacion,
       // Días de gestación cumplidos hoy (para la cuenta regresiva)
       diasGestacion: Math.max(0, Math.round((inicioHoy.getTime() - g.fechaInicio.getTime()) / MS_DIA)),
+      // Servicio del que viene: inseminación, monta natural o sin registrar
+      origen: g.eventoReproductivo?.tipo ?? null,
       // Padre: el toro (si se registró) o el semental de la inseminación
       padre: g.padre
         ? `#${g.padre.numeroIdentificacion}${g.padre.nombre ? ` · ${g.padre.nombre}` : ''}`
@@ -235,6 +338,8 @@ export interface DatosCrearEvento {
   fechaInicioGestacion?: Date;
   fechaPartoEsperado?:   Date;
   padreId?:              string;
+  // La pantalla ya preguntó y la hembra está vacía (ver verificarSituacionReproductiva)
+  resolucionPrevia?:     ResolucionPrevia;
 }
 
 export async function crearEventoReproductivo(datos: DatosCrearEvento) {
@@ -260,6 +365,7 @@ export async function crearEventoReproductivo(datos: DatosCrearEvento) {
     clasificacionIA, tecnicaDeposicion, patologiasVaca,
     tasaMetabolicaBasal, balanceEnergetico, temperaturaUterina, manejoHato,
     resultadoDiagnostico, metodoDiagnostico, fechaInicioGestacion, fechaPartoEsperado, padreId, toroId,
+    resolucionPrevia,
     ...resto
   } = datos;
   // Solo campos válidos de EventoReproductivo van en resto: tipo, fecha, descripcion, observaciones
@@ -279,7 +385,29 @@ export async function crearEventoReproductivo(datos: DatosCrearEvento) {
 
   const toroValido = tipo === TipoEventoReproductivo.MONTA_NATURAL ? await validarToro(toroId, animalId) : undefined;
 
+  // Monta o celo: la hembra no puede estar preñada ni con un servicio sin confirmar
+  await verificarSituacionReproductiva(animalId, tipo, fecha, registradoPorId, resolucionPrevia);
+
   if (tipo === TipoEventoReproductivo.DIAGNOSTICO_GESTACION && resultadoDiagnostico) {
+    if (fecha.getTime() > Date.now() + MS_DIA) throw new ErrorValidacionDatos('La fecha no puede ser futura');
+    // Con una gestación en curso: positivo no aplica (ya está preñada); un
+    // negativo significa que la perdió, y se cierra la gestación.
+    const enCurso = await prisma.gestacion.findFirst({
+      where: { madreId: animalId, estadoGestacion: EstadoGestacion.EN_CURSO },
+      select: { id: true, fechaInicio: true, fechaPartoEsperado: true },
+    });
+    if (enCurso) {
+      if (resultadoDiagnostico === 'POSITIVO') {
+        throw new ErrorValidacionDatos(
+          `La hembra ya tiene una gestación en curso desde el ${fmtFecha(enCurso.fechaInicio)} `
+            + `(parto esperado el ${fmtFecha(enCurso.fechaPartoEsperado)})`,
+        );
+      }
+      if (fecha < enCurso.fechaInicio) {
+        throw new ErrorValidacionDatos('El diagnóstico no puede ser anterior al inicio de la gestación');
+      }
+      await cerrarGestacion(enCurso.id, 'PERDIDA', fecha, undefined, registradoPorId);
+    }
     // Con un servicio por confirmar, el diagnóstico lo confirma o lo descarta.
     const pendiente = (await listarServiciosPorConfirmar()).find((s) => s.animal.id === animalId);
     if (pendiente) {
@@ -294,15 +422,10 @@ export async function crearEventoReproductivo(datos: DatosCrearEvento) {
       return evento;
     }
 
-    // Positivo sin servicio registrado (p. ej. monta en potrero): abre la
-    // gestación con la concepción estimada y empieza la cuenta regresiva.
+    // Positivo sin servicio registrado: se asume monta natural (p. ej. con el
+    // toro en el potrero). Se deja la monta en la fecha estimada de la
+    // concepción, vinculada a la gestación, y empieza la cuenta regresiva.
     if (resultadoDiagnostico === 'POSITIVO') {
-      const gestacionActiva = await prisma.gestacion.findFirst({
-        where: { madreId: animalId, estadoGestacion: EstadoGestacion.EN_CURSO },
-        select: { id: true },
-      });
-      if (gestacionActiva) throw new ErrorValidacionDatos('La hembra ya tiene una gestación en curso');
-
       const padreValido = await validarToro(padreId, animalId);
       // Sin fecha de concepción, se asume un diagnóstico a los 35 días
       const inicio = fechaInicioGestacion ?? new Date(fecha.getTime() - 35 * MS_DIA);
@@ -310,6 +433,16 @@ export async function crearEventoReproductivo(datos: DatosCrearEvento) {
       const semanaGestacion = Math.floor((fecha.getTime() - inicio.getTime()) / (7 * MS_DIA));
 
       return prisma.$transaction(async (tx) => {
+        const monta = await tx.eventoReproductivo.create({
+          data: {
+            tipo: TipoEventoReproductivo.MONTA_NATURAL,
+            fecha: inicio,
+            descripcion: 'Monta natural (registrada con el diagnóstico de gestación)',
+            animal:        { connect: { id: animalId } },
+            registradoPor: { connect: { id: registradoPorId } },
+            ...(padreValido && { toro: { connect: { id: padreValido } } }),
+          },
+        });
         const gestacion = await tx.gestacion.create({
           data: {
             madreId: animalId,
@@ -318,6 +451,7 @@ export async function crearEventoReproductivo(datos: DatosCrearEvento) {
             fechaPartoEsperado: fechaPartoEsperado ?? new Date(inicio.getTime() + DIAS_GESTACION_BOVINA * MS_DIA),
             estadoGestacion: EstadoGestacion.EN_CURSO,
             observaciones,
+            eventoReproductivoId: monta.id,
           },
         });
         return tx.eventoReproductivo.create({
@@ -389,6 +523,60 @@ export async function listarGestacionesActivas(fincaId?: string) {
     },
     orderBy: { fechaPartoEsperado: 'asc' },
   });
+}
+
+// Detalle completo de una gestación: madre, de qué servicio viene
+// (inseminación o monta), padre, diagnósticos, cuenta regresiva y resultado.
+export async function obtenerGestacion(id: string) {
+  const g = await prisma.gestacion.findUnique({
+    where: { id },
+    include: {
+      madre: {
+        select: {
+          id: true, numeroIdentificacion: true, nombre: true,
+          raza: { select: { nombre: true } },
+          lote: { select: { nombre: true, finca: { select: { nombre: true } } } },
+        },
+      },
+      padre: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+      eventoReproductivo: {
+        select: {
+          id: true, tipo: true, fecha: true, descripcion: true, observaciones: true,
+          registradoPor: { select: { nombre: true, apellido: true } },
+          toro: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+          inseminacion: {
+            select: {
+              numeroIntento: true, tecnicaDeposicion: true, clasificacionIA: true,
+              inventarioSemen: { select: { codigoDosis: true, semental: { select: { nombre: true, raza: { select: { nombre: true } } } } } },
+            },
+          },
+        },
+      },
+      diagnosticos: {
+        select: { fechaDiagnostico: true, resultado: true, metodoDiagnostico: true, semanaGestacion: true, observaciones: true },
+        orderBy: { fechaDiagnostico: 'asc' },
+      },
+      nacimientos: {
+        select: {
+          fechaNacimiento: true, tipoParto: true, pesoAlNacer: true, sexoCria: true, estadoCria: true,
+          cria: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+        },
+      },
+    },
+  });
+  if (!g) throw new ErrorNoEncontrado('Gestación');
+
+  const inicioHoy = new Date(new Date().setHours(0, 0, 0, 0));
+  const f = g.fechaPartoEsperado;
+  const diaParto = new Date(f.getFullYear(), f.getMonth(), f.getDate());
+  const fin = g.fechaPartoReal ?? inicioHoy;
+  return {
+    ...g,
+    diasGestacion: Math.max(0, Math.round((fin.getTime() - g.fechaInicio.getTime()) / MS_DIA)),
+    diasRestantes: g.estadoGestacion === EstadoGestacion.EN_CURSO
+      ? Math.round((diaParto.getTime() - inicioHoy.getTime()) / MS_DIA)
+      : null,
+  };
 }
 
 export interface DatosCrearGestacion {
@@ -464,7 +652,10 @@ export async function crearGestacion(datos: DatosCrearGestacion) {
 // diagnóstico de gestación posterior, o cuando la hembra ya tiene otra
 // gestación en curso o dejó de estar activa.
 
-export async function listarServiciosPorConfirmar(fincaId?: string) {
+// Con tipo se devuelven solo las inseminaciones (módulo Inseminación) o solo
+// las montas naturales (módulo Reproducción); siempre se toma el último
+// servicio de cada hembra, sea del tipo que sea.
+export async function listarServiciosPorConfirmar(fincaId?: string, tipo?: TipoEventoReproductivo) {
   const servicios = await prisma.eventoReproductivo.findMany({
     where: {
       tipo: { in: TIPOS_SERVICIO },
@@ -513,6 +704,7 @@ export async function listarServiciosPorConfirmar(fincaId?: string) {
 
   const hoy = Date.now();
   return candidatos
+    .filter((s) => !tipo || s.tipo === tipo)
     .filter((s) => !diagnosticos.some((d) => d.animalId === s.animal.id && d.fecha >= s.fecha))
     .map((s) => {
       const diasTranscurridos = Math.floor((hoy - s.fecha.getTime()) / MS_DIA);
@@ -556,6 +748,9 @@ export async function confirmarServicio(eventoId: string, datos: DatosConfirmarS
     throw new ErrorValidacionDatos('Solo se puede confirmar una inseminación artificial o monta natural');
   }
   if (servicio.gestacion) throw new ErrorValidacionDatos('Este servicio ya tiene una gestación registrada');
+  if (datos.fechaDiagnostico && datos.fechaDiagnostico < new Date(servicio.fecha.getTime() - MS_DIA / 2)) {
+    throw new ErrorValidacionDatos(`El diagnóstico no puede ser anterior al servicio (${fmtFecha(servicio.fecha)})`);
+  }
 
   if (datos.prenada) {
     const gestacionActiva = await prisma.gestacion.findFirst({
@@ -730,6 +925,25 @@ export async function obtenerIndicadoresReproductivos(anio: number, filtros: Fil
     return edadDias <= 365;
   }).length;
 
+  // Inseminaciones del año que terminaron en gestación, y montas naturales del año
+  const [inseminacionesExitosas, montasNaturales] = await Promise.all([
+    prisma.eventoReproductivo.count({
+      where: {
+        tipo: TipoEventoReproductivo.INSEMINACION_ARTIFICIAL,
+        fecha: { gte: inicioAnio, lte: finAnio },
+        gestacion: { isNot: null },
+        animal: filtroAnimal,
+      },
+    }),
+    prisma.eventoReproductivo.count({
+      where: {
+        tipo: TipoEventoReproductivo.MONTA_NATURAL,
+        fecha: { gte: inicioAnio, lte: finAnio },
+        animal: filtroAnimal,
+      },
+    }),
+  ]);
+
   const intervaloPartosPromedioDias = await calcularIntervaloPartosPromedio(filtroAnimal);
   const diasAbiertos = await calcularDiasAbiertos(filtroAnimal, finAnio);
 
@@ -752,6 +966,8 @@ export async function obtenerIndicadoresReproductivos(anio: number, filtros: Fil
     tasaMortalidadCrias: nacimientosAnio > 0 ? +((criasFallecidas / nacimientosAnio) * 100).toFixed(1) : 0,
     totalCelos,
     totalInseminaciones,
+    inseminacionesExitosas,
+    montasNaturales,
     animalesConRepeticion,
     tasaRepeticionCelo: totalInseminaciones > 0 ? +((animalesConRepeticion / totalInseminaciones) * 100).toFixed(1) : 0,
     intervaloPartosPromedioDias,

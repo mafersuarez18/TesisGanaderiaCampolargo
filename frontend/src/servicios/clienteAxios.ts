@@ -266,7 +266,10 @@ clienteHttp.interceptors.response.use(
 
       if (error.response?.status && error.response.status >= 500) {
         toast.error('Error del servidor. Por favor intente nuevamente.');
-      } else if (error.response?.status !== 422) {
+      } else if (error.response?.status !== 422
+        // Un 409 con detalle lo resuelve la pantalla (p. ej. preguntando si la
+        // hembra quedó preñada), no hace falta además el aviso de error
+        && !(error.response?.status === 409 && (error.response.data as { detalle?: unknown })?.detalle)) {
         // Los errores 422 (validación) se manejan en el formulario
         toast.error(mensaje);
       }

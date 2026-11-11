@@ -4,16 +4,18 @@ import { z } from 'zod';
 import { TipoAccionAuditoria } from '@prisma/client';
 import { verificarToken, requerirPrivilegio } from '../../compartido/middlewares/autenticacion';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { respuestaListado } from '../../compartido/utilidades/respuestaHttp';
+import { respuestaListado, respuestaExito } from '../../compartido/utilidades/respuestaHttp';
+import { ErrorNoEncontrado } from '../../compartido/tipos/respuesta';
+import { describirRegistro, datosLegibles, animalDeLosDatos } from './auditoria.detalle';
 import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/paginacion';
 
 const enrutador = Router();
 
 enrutador.use(verificarToken, requerirPrivilegio('auditoria.ver'));
 
-// Único endpoint del módulo: listado paginado y filtrable de
-// RegistroAuditoria (los registros en sí los crea el middleware
-// registrarAuditoria desde cada módulo, no este archivo).
+// Listado paginado y filtrable de RegistroAuditoria, y el detalle de un
+// registro (los registros en sí los crea el middleware registrarAuditoria
+// desde cada módulo, no este archivo).
 enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const filtros = z.object({
@@ -79,6 +81,48 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
       exitoso:   r.exitosa,
     }));
     return respuestaListado(res, datos, construirMeta(total, pagina, porPagina));
+  } catch (error) { return next(error); }
+});
+
+// GET /api/auditoria/:id — detalle completo de una acción: qué se hizo, sobre
+// qué registro (descrito en lenguaje natural), quién la hizo y qué datos envió.
+enrutador.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const r = await prisma.registroAuditoria.findUnique({
+      where: { id: req.params['id'] as string },
+      include: {
+        usuario: { select: { nombre: true, apellido: true, correo: true, rol: { select: { nombre: true } } } },
+      },
+    });
+    if (!r) throw new ErrorNoEncontrado('Registro de auditoría no encontrado');
+
+    const [registroAfectado, datosEnviados, datosPrevios, animalEnDatos] = await Promise.all([
+      describirRegistro(r.entidadTipo, r.entidadId),
+      datosLegibles(r.datosNuevos),
+      datosLegibles(r.datosAnteriores),
+      animalDeLosDatos(r.datosNuevos),
+    ]);
+
+    return respuestaExito(res, {
+      id: r.id,
+      accion: r.accion,
+      modulo: r.modulo,
+      descripcion: r.descripcion,
+      recurso: r.entidadTipo ?? r.modulo,
+      recursoId: r.entidadId,
+      exitoso: r.exitosa,
+      errorMensaje: r.errorMensaje,
+      creadoEn: r.creadoEn,
+      ipAddress: r.direccionIP,
+      userAgent: r.agenteUsuario,
+      usuario: r.usuario,
+      // Si había un registro y ya no aparece, es que se eliminó después
+      registroAfectado: registroAfectado ?? (r.entidadId ? { descripcion: null, eliminado: true } : null),
+      // Animal involucrado, aunque el registro no lo indique directamente
+      animal: registroAfectado?.animal ?? animalEnDatos,
+      datosEnviados,
+      datosPrevios,
+    });
   } catch (error) { return next(error); }
 });
 

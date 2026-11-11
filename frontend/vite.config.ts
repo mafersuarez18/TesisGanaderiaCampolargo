@@ -10,7 +10,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo-campolargo.png'],
+      includeAssets: ['favicon.ico', 'favicon-96.png', 'apple-touch-icon.png', 'logo-campolargo.png'],
       manifest: {
         name: 'Sistema Campolargo — Gestión Veterinaria',
         short_name: 'Campolargo',

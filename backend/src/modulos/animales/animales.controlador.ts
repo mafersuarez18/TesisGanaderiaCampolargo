@@ -38,6 +38,12 @@ const esquemaCrearAnimal = z.object({
   observaciones:   z.string().max(1000).optional(),
   procedencia:     z.string().max(300).optional(),
   loteId:          z.string().min(1),
+  // Potrero del lote: uno existente (potreroId, null para quitarlo) o uno
+  // nuevo escrito a mano (potreroNombre), que se crea en ese lote.
+  potreroId:       z.string().min(1).nullable().optional(),
+  potreroNombre:   z.string().trim().min(1).max(100).optional(),
+  // Superficie del potrero nuevo (opcional; solo se usa al crearlo)
+  potreroHectareas: z.number().positive().max(100000).optional(),
   razaId:          z.string().min(1),
   padreId:         z.string().min(1).optional(),
   madreId:         z.string().min(1).optional(),

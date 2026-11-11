@@ -7,7 +7,9 @@ import {
   listarDispositivos,
   obtenerMovilidadAnimal,
   importarUbicacionesDesdeArchivo,
+  crearDispositivo,
 } from './geolocalizacion.servicio';
+import { generarMovilidad } from '../reportes/reportes.servicio';
 import { respuestaExito, respuestaCreado } from '../../compartido/utilidades/respuestaHttp';
 import { ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
@@ -71,6 +73,40 @@ export async function controladorListarDispositivos(
   try {
     const dispositivos = await listarDispositivos();
     return respuestaExito(res, dispositivos);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorCrearDispositivo(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const datos = z.object({
+      codigoDispositivo: z.string().trim().min(2, 'El código del collar es requerido').max(60),
+      animalId:          z.string().min(1, 'Seleccione el animal'),
+      modelo:            z.string().trim().max(100).optional(),
+      fabricante:        z.string().trim().max(100).optional(),
+      // El formulario la pide en minutos; se guarda en segundos
+      frecuenciaMinutos: z.number().int().min(1).max(1440).default(60),
+    }).parse(req.body);
+    const { frecuenciaMinutos, ...resto } = datos;
+    const dispositivo = await crearDispositivo({ ...resto, frecuenciaActualizacion: frecuenciaMinutos * 60 });
+    return respuestaCreado(res, dispositivo);
+  } catch (error) { return next(error); }
+}
+
+// PDF imprimible del reporte de movilidad de un animal (rango opcional)
+export async function controladorReporteMovilidad(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const { desde, hasta } = z.object({
+      desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    }).parse(req.query);
+    await generarMovilidad(res, req.params['animalId'] as string, {
+      desde: desde ? new Date(`${desde}T00:00:00`) : undefined,
+      hasta: hasta ? new Date(`${hasta}T23:59:59.999`) : undefined,
+    });
   } catch (error) { return next(error); }
 }
 

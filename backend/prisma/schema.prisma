@@ -286,6 +286,8 @@ model Potrero {
   loteId String   @map("lote_id")
   lote   Lote   @relation(fields: [loteId], references: [id], onDelete: Restrict)
 
+  animales Animal[]
+
   @@map("potrero")
 }
 
@@ -362,8 +364,12 @@ model Animal {
   // (dirección inversa a Nacimiento.criaId, que ya cumple el mismo propósito)
   nacimientoId String? @unique @map("nacimiento_id")
 
+  // Potrero (dentro del lote) donde se aloja el animal; opcional
+  potreroId String?  @map("potrero_id")
+
   // Relaciones de infraestructura
-  lote  Lote   @relation(fields: [loteId], references: [id], onDelete: Restrict)
+  lote    Lote     @relation(fields: [loteId], references: [id], onDelete: Restrict)
+  potrero Potrero? @relation(fields: [potreroId], references: [id], onDelete: SetNull)
   raza  Raza   @relation(fields: [razaId], references: [id], onDelete: Restrict)
 
   // Árbol genealógico (auto-referencia)
@@ -390,6 +396,7 @@ model Animal {
   registrosVitaminas RegistroVitaminas[]
 
   @@index([loteId])
+  @@index([potreroId])
   @@index([razaId])
   @@index([estado])
   @@index([estadoSanitario])

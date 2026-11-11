@@ -9,6 +9,8 @@ import { respuestaExito, respuestaCreado, respuestaListado } from '../../compart
 import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/paginacion';
 import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
+import { verificarSituacionReproductiva } from '../reproduccion/reproduccion.servicio';
+
 const enrutador = Router();
 
 enrutador.use(verificarToken);
@@ -187,6 +189,8 @@ enrutador.post('/', requerirPrivilegio('inseminacion.crear'), registrarAuditoria
       temperaturaUterina:  z.number().optional(),
       // Manejo del hato
       manejoHato:          z.nativeEnum(NivelEstres).optional(),
+      // La pantalla ya preguntó y la hembra está vacía
+      resolucionPrevia:    z.literal('VACIA').optional(),
     }).parse(req.body);
 
     // Solo una hembra puede ser receptora
@@ -208,6 +212,12 @@ enrutador.post('/', requerirPrivilegio('inseminacion.crear'), registrarAuditoria
     if (inventario.cantidadDosis - inventario.cantidadUsada < 1) {
       throw new ErrorConflicto(`No hay dosis disponibles del lote ${inventario.codigoDosis}`);
     }
+
+    // No se insemina una hembra preñada ni con su último servicio sin
+    // confirmar: se le pregunta a la pantalla si quedó preñada (ver servicio)
+    await verificarSituacionReproductiva(
+      datos.receptoraId, 'INSEMINACION_ARTIFICIAL', datos.fecha, req.usuarioActual!.id, datos.resolucionPrevia,
+    );
 
     const {
       receptoraId, inventarioSemenId, fecha, numeroIntento, observaciones,

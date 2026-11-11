@@ -75,7 +75,12 @@ export class ErrorValidacionDatos extends ErrorAplicacion {
 }
 
 export class ErrorConflicto extends ErrorAplicacion {
-  constructor(mensaje: string) {
+  // Datos adicionales para que el frontend resuelva el conflicto (p. ej. el
+  // servicio pendiente por el que se le pregunta si la hembra quedó preñada)
+  public readonly detalle?: Record<string, unknown>;
+
+  constructor(mensaje: string, detalle?: Record<string, unknown>) {
     super(mensaje, 409);
+    this.detalle = detalle;
   }
 }

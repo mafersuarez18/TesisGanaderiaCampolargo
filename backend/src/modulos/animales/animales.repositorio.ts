@@ -32,6 +32,7 @@ const seleccionListado = {
   color: true,
   raza: { select: { id: true, nombre: true } },
   lote:  { select: { id: true, nombre: true, finca: { select: { id: true, nombre: true } } } },
+  potrero: { select: { id: true, nombre: true } },
   fechaIngreso: true,
 } satisfies Prisma.AnimalSelect;
 

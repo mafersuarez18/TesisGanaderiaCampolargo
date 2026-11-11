@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import Icono from '../../componentes/ui/Icono';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
+import SelectorPotrero from '../../componentes/ui/SelectorPotrero';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import { clienteHttp, ID_TOAST_CONEXION } from '../../servicios/clienteAxios';
 import toast from 'react-hot-toast';
@@ -36,6 +37,10 @@ const esquemaAnimal = z.object({
   // lo que realmente se envía al backend es el lote (obligatorio).
   fincaId:          z.string().min(1, 'Seleccione una finca'),
   loteId:           z.string().min(1, 'Seleccione un lote'),
+  // Potrero del lote: uno existente o uno nuevo escrito a mano (opcional)
+  potreroId:        z.string().optional().or(z.literal('')),
+  potreroNombre:    z.string().max(100).optional().or(z.literal('')),
+  potreroHectareas: z.string().optional().or(z.literal('')),
   // Raza: se selecciona una existente (razaId) o se escribe una nueva
   // (razaNombreNueva), caso en el cual tipoCruce pasa a ser obligatorio.
   razaId:           z.string().optional().or(z.literal('')),
@@ -111,6 +116,7 @@ export default function PaginaFormAnimal() {
   });
 
   const fincaSeleccionada = watch('fincaId');
+  const loteSeleccionado = watch('loteId');
   const razaIdActual = watch('razaId');
   const razaNombreNuevaActual = watch('razaNombreNueva');
   const esRazaNueva = !razaIdActual && !!razaNombreNuevaActual;
@@ -139,6 +145,8 @@ export default function PaginaFormAnimal() {
         marcas:          animalExistente.marcas ?? '',
         fincaId:         animalExistente.lote?.finca?.id ?? '',
         loteId:          animalExistente.lote?.id ?? '',
+        potreroId:       animalExistente.potrero?.id ?? '',
+        potreroNombre:   '',
         razaId:          animalExistente.raza?.id ?? '',
         padreId:         animalExistente.padre?.id ?? '',
         madreId:         animalExistente.madre?.id ?? '',
@@ -186,7 +194,13 @@ export default function PaginaFormAnimal() {
     mutationFn: async (datos: FormularioAnimal) => {
       // fincaId es solo un filtro de UI para acortar la lista de lotes; el
       // backend solo recibe loteId (la finca se deriva del lote).
-      const { fincaId: _fincaId, razaNombreNueva, razaTipoCruce, razaOrigen, ...resto } = datos;
+      const {
+        fincaId: _fincaId, razaNombreNueva, razaTipoCruce, razaOrigen, potreroId, potreroNombre, potreroHectareas, ...resto
+      } = datos;
+      const hectareas = Number(potreroHectareas);
+      const potrero = potreroNombre?.trim()
+        ? { potreroNombre: potreroNombre.trim(), ...(potreroHectareas && hectareas > 0 && { potreroHectareas: hectareas }) }
+        : potreroId ? { potreroId } : esEdicion ? { potreroId: null } : {};
 
       // Si se escribió una raza que no existe en el catálogo, se crea primero
       let razaId = resto.razaId;
@@ -212,12 +226,12 @@ export default function PaginaFormAnimal() {
         }).filter(([, v]) => v !== '' && v !== undefined && v !== null)
       );
       if (esEdicion) {
-        const { data } = await clienteHttp.patch(`/animales/${id}`, payload, { descripcionOffline: 'Edición de animal' });
+        const { data } = await clienteHttp.patch(`/animales/${id}`, { ...payload, ...potrero }, { descripcionOffline: 'Edición de animal' });
         return data.datos;
       }
       const { data } = await clienteHttp.post(
         '/animales',
-        { ...payload, ...(cria && { nacimientoId: cria.id }) },
+        { ...payload, ...potrero, ...(cria && { nacimientoId: cria.id }) },
         { descripcionOffline: cria ? 'Registro de cría' : 'Nuevo animal' },
       );
       return data.datos;
@@ -240,8 +254,15 @@ export default function PaginaFormAnimal() {
         navegar(esEdicion ? `/animales/${id}` : '/animales');
         return;
       }
-      toast.success(esEdicion ? 'Animal actualizado correctamente' : 'Animal registrado correctamente');
-      navegar(`/animales/${animal.id}`);
+      cliente.invalidateQueries({ queryKey: ['potreros-lote'] });
+      if (esEdicion) {
+        toast.success('Animal actualizado correctamente');
+        navegar(`/animales/${animal.id}`);
+        return;
+      }
+      // Al registrar se vuelve al listado del rebaño
+      toast.success(`${animal.nombre ?? `#${animal.numeroIdentificacion}`} se registró correctamente`);
+      navegar('/animales');
     },
     onError: (error: any) => {
       toast.error(error?.response?.data?.mensaje ?? 'Error al guardar el animal');
@@ -444,13 +465,29 @@ export default function PaginaFormAnimal() {
               </select>
             </CampoForm>
             <CampoForm etiqueta="Lote *" error={errors.loteId?.message}>
-              <select {...register('loteId')} className="campo-entrada" disabled={!fincaSeleccionada}>
+              <select
+                {...register('loteId', {
+                  // Los potreros son de cada lote: al cambiar de lote se limpia
+                  onChange: () => { setValue('potreroId', ''); setValue('potreroNombre', ''); setValue('potreroHectareas', ''); },
+                })}
+                className="campo-entrada"
+                disabled={!fincaSeleccionada}
+              >
                 <option value="">{fincaSeleccionada ? 'Seleccionar lote...' : 'Primero seleccione una finca'}</option>
                 {lotes.map((l: any) => (
                   <option key={l.id} value={l.id}>{l.nombre}</option>
                 ))}
               </select>
             </CampoForm>
+            <SelectorPotrero
+              loteId={loteSeleccionado ?? ''}
+              potreroId={watch('potreroId') ?? ''}
+              potreroNombre={watch('potreroNombre') ?? ''}
+              hectareas={watch('potreroHectareas') ?? ''}
+              onSeleccionar={(idPotrero) => { setValue('potreroId', idPotrero); setValue('potreroNombre', ''); setValue('potreroHectareas', ''); }}
+              onEscribir={(texto) => { setValue('potreroId', ''); setValue('potreroNombre', texto); }}
+              onHectareas={(valor) => setValue('potreroHectareas', valor)}
+            />
           </div>
         </SeccionFormulario>
 

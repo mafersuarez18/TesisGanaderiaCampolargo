@@ -18,7 +18,7 @@ import {
 // Cada descarga de reporte queda registrada en la auditoría (a diferencia
 // del resto de la API, aquí se hace a mano porque son GET, y el middleware
 // registrarAuditoria genérico solo audita mutaciones).
-function auditarExportacion(req: Request, descripcion: string) {
+export function auditarExportacion(req: Request, descripcion: string) {
   prisma.registroAuditoria.create({
     data: {
       accion:       TipoAccionAuditoria.EXPORTAR,

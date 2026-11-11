@@ -51,6 +51,7 @@ export function manejarErrores(
     res.status(error.codigoHttp).json({
       exito: false,
       mensaje: error.message,
+      ...(error instanceof ErrorConflicto && error.detalle && { detalle: error.detalle }),
     });
     return;
   }

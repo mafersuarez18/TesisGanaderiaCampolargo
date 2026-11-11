@@ -12,7 +12,12 @@ import Icono from '../../componentes/ui/Icono';
 import Paginacion from '../../componentes/ui/Paginacion';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
 import CampoFecha from '../../componentes/ui/CampoFecha';
+import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
 import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
+import ListaServiciosPorConfirmar, { useServiciosPorConfirmar } from '../../componentes/reproduccion/ListaServiciosPorConfirmar';
+import ModalSituacionReproductiva, {
+  conflictoReproductivo, type ConflictoReproductivo,
+} from '../../componentes/reproduccion/ModalSituacionReproductiva';
 import toast from 'react-hot-toast';
 import { isoMediodia } from '../../servicios/fechas';
 
@@ -80,7 +85,6 @@ const api = {
   sementales:    () => clienteHttp.get('/inseminacion/sementales').then((r) => r.data.datos ?? []),
   inventario:    (p: number) => clienteHttp.get('/inseminacion/inventario', { params: { pagina: p, porPagina: 20 } }).then((r) => r.data),
   inseminaciones:(p: number) => clienteHttp.get('/inseminacion', { params: { pagina: p, porPagina: 20 } }).then((r) => r.data),
-  animalesHembra:() => clienteHttp.get('/animales', { params: { sexo: 'HEMBRA', estado: 'ACTIVO', porPagina: 200 } }).then((r) => r.data.datos ?? []),
   efectividad:   () => clienteHttp.get('/reproduccion/efectividad-inseminacion').then((r) => r.data.datos ?? []),
 };
 
@@ -111,18 +115,22 @@ export default function PaginaInseminacion() {
   const puedeRegistrar = esAdministrador || esVeterinario;
   const qc = useQueryClient();
 
-  const [pestaña,      setPestaña]      = useState<'inseminaciones' | 'inventario' | 'sementales' | 'efectividad'>('inseminaciones');
+  const [pestaña,      setPestaña]      = useState<'inseminaciones' | 'porConfirmar' | 'inventario' | 'sementales' | 'efectividad'>('inseminaciones');
   const [pagIns,       setPagIns]       = useState(1);
   const [pagInv,       setPagInv]       = useState(1);
   const [modalIns,     setModalIns]     = useState(false);
   const [modalLote,    setModalLote]    = useState(false);
   const [modalSemental,setModalSemental]= useState(false);
+  // Hembra con un servicio sin confirmar o preñada: se pregunta qué pasó
+  const [conflicto,    setConflicto]    = useState<ConflictoReproductivo | null>(null);
+  const [ultimoForm,   setUltimoForm]   = useState<FormInseminacion | null>(null);
+  // Inseminaciones a las que falta registrar si la hembra quedó preñada
+  const { data: porConfirmar = [] } = useServiciosPorConfirmar('INSEMINACION_ARTIFICIAL');
 
   // Queries
   const { data: sementales = [] } = useQuery<Semental[]>({ queryKey: ['sementales'], queryFn: api.sementales });
   const { data: dataInv,  isLoading: cargInv  } = useQuery({ queryKey: ['inv-semen', pagInv],    queryFn: () => api.inventario(pagInv) });
   const { data: dataIns,  isLoading: cargIns  } = useQuery({ queryKey: ['inseminaciones', pagIns], queryFn: () => api.inseminaciones(pagIns) });
-  const { data: hembras = [] } = useQuery<Animal[]>({ queryKey: ['hembras-select'], queryFn: api.animalesHembra, enabled: modalIns });
   const { data: efectividad = [], isLoading: cargEfec } = useQuery<EfectividadSemental[]>({
     queryKey: ['efectividad-inseminacion'],
     queryFn: api.efectividad,
@@ -138,12 +146,15 @@ export default function PaginaInseminacion() {
 
   // Mutation registrar inseminación
   const mutRegistrar = useMutation({
-    mutationFn: (datos: FormInseminacion) => {
+    mutationFn: ({ datos, vacia }: { datos: FormInseminacion; vacia?: boolean }) => {
+      setUltimoForm(datos);
       const payload: Record<string, any> = {
         receptoraId:       datos.receptoraId,
         inventarioSemenId: datos.inventarioSemenId,
         fecha:             isoMediodia(datos.fecha),
         numeroIntento:     datos.numeroIntento,
+        // Ya se respondió que está vacía: cerrar lo pendiente y registrar
+        ...(vacia && { resolucionPrevia: 'VACIA' }),
       };
       if (datos.observaciones)       payload.observaciones       = datos.observaciones;
       if (datos.clasificacionIA)     payload.clasificacionIA     = datos.clasificacionIA;
@@ -161,11 +172,16 @@ export default function PaginaInseminacion() {
       invalidarSeguimientoReproductivo(qc);
       qc.invalidateQueries({ queryKey: ['inv-semen'] });
       if (!r.data?.offline) {
-        toast.success('Inseminación registrada. Quedó en Reproducción → Por confirmar; en 21 días llegará la alerta para revisarla.', { duration: 6000 });
+        toast.success('Inseminación registrada. Quedó en la pestaña Por confirmar; en 21 días llegará la alerta para revisarla.', { duration: 6000 });
       }
+      setConflicto(null);
       setModalIns(false);
     },
-    onError: (e: any) => toast.error(e?.response?.data?.mensaje ?? 'Error al registrar'),
+    onError: (e: any) => {
+      const caso = conflictoReproductivo(e);
+      if (caso) { setConflicto(caso); return; }
+      toast.error(e?.response?.data?.mensaje ?? 'Error al registrar');
+    },
   });
 
   return (
@@ -215,6 +231,7 @@ export default function PaginaInseminacion() {
       <div className="flex gap-1 p-1 bg-surface-container rounded-xl overflow-x-auto max-w-full">
         {([
           { clave: 'inseminaciones', et: 'Inseminaciones', ico: 'biotech' },
+          { clave: 'porConfirmar',   et: 'Por confirmar', ico: 'pending_actions' },
           { clave: 'inventario',     et: 'Inventario semen', ico: 'inventory' },
           { clave: 'sementales',     et: 'Sementales', ico: 'pets' },
           { clave: 'efectividad',    et: 'Efectividad IA', ico: 'insights' },
@@ -230,9 +247,21 @@ export default function PaginaInseminacion() {
           >
             <Icono nombre={p.ico} clase="text-[16px]" />
             {p.et}
+            {p.clave === 'porConfirmar' && porConfirmar.some((s) => s.listoParaRevisar) && (
+              <span className="ml-1 min-w-4 h-4 px-1 rounded-full bg-error text-on-primary text-[9px] font-bold flex items-center justify-center">
+                {porConfirmar.filter((s) => s.listoParaRevisar).length}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {/* ── PESTAÑA: POR CONFIRMAR (solo inseminaciones) ───────────────────── */}
+      {pestaña === 'porConfirmar' && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <ListaServiciosPorConfirmar tipo="INSEMINACION_ARTIFICIAL" />
+        </motion.div>
+      )}
 
       {/* ── PESTAÑA: INSEMINACIONES ─────────────────────────────────────────── */}
       {pestaña === 'inseminaciones' && (
@@ -567,12 +596,19 @@ export default function PaginaInseminacion() {
         }
       >
         <FormularioInseminacion
-          hembras={hembras}
           lotes={lotesDisponibles}
-          onSubmit={(datos) => mutRegistrar.mutate(datos)}
+          onSubmit={(datos) => mutRegistrar.mutate({ datos })}
           pendiente={mutRegistrar.isPending}
         />
       </Modal>
+
+      <ModalSituacionReproductiva
+        conflicto={conflicto}
+        queSeRegistra="la inseminación"
+        alCerrar={() => setConflicto(null)}
+        alVacia={() => ultimoForm && mutRegistrar.mutate({ datos: ultimoForm, vacia: true })}
+        alPrenada={() => { setConflicto(null); setModalIns(false); }}
+      />
 
       {/* ── MODAL: Registrar lote de semen ───────────────────────────────────── */}
       <AnimatePresence>
@@ -660,7 +696,6 @@ function TarjetaSemental({ semental }: { semental: Semental }) {
 
 // ── Formulario de inseminación ────────────────────────────────────────────────
 interface PropsFormInseminacion {
-  hembras: Animal[];
   lotes: LoteSemen[];
   onSubmit: (datos: FormInseminacion) => void;
   pendiente: boolean;
@@ -677,7 +712,7 @@ function GrupoIA({ titulo, children }: { titulo: string; children: React.ReactNo
   );
 }
 
-function FormularioInseminacion({ hembras, lotes, onSubmit }: PropsFormInseminacion) {
+function FormularioInseminacion({ lotes, onSubmit }: PropsFormInseminacion) {
   const { register, control, handleSubmit, formState: { errors } } = useForm<FormInseminacion>({
     resolver: zodResolver(esquemaInseminacion),
     defaultValues: { numeroIntento: 1, fecha: new Date().toISOString().split('T')[0] },
@@ -686,17 +721,19 @@ function FormularioInseminacion({ hembras, lotes, onSubmit }: PropsFormInseminac
   return (
     <form id="form-inseminacion" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
 
-      {/* Animal receptora */}
-      <CampoForm etiqueta="Receptora (hembra) *" error={errors.receptoraId?.message}>
-        <select {...register('receptoraId')} className="campo-entrada">
-          <option value="">Seleccionar hembra...</option>
-          {hembras.map((h) => (
-            <option key={h.id} value={h.id}>
-              #{h.numeroIdentificacion}{h.nombre ? ` — ${h.nombre}` : ''}{h.lote?.finca ? ` (${h.lote.finca.nombre})` : ''}
-            </option>
-          ))}
-        </select>
-      </CampoForm>
+      {/* Animal receptora: se escribe el nombre o la identificación y se
+          elige de la lista (solo hembras activas) */}
+      <Controller name="receptoraId" control={control} render={({ field }) => (
+        <BuscadorAnimal
+          valor={field.value ?? ''}
+          alSeleccionar={(id) => field.onChange(id)}
+          etiqueta="Receptora (hembra)"
+          requerido
+          sexo="HEMBRA"
+          placeholder="Escriba el nombre o la identificación de la hembra..."
+          error={errors.receptoraId?.message}
+        />
+      )} />
 
       {/* Lote de semen */}
       <CampoForm etiqueta="Lote de semen *" error={errors.inventarioSemenId?.message}>

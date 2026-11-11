@@ -48,6 +48,22 @@ enrutador.get('/', requerirPrivilegio('lotes.ver'), async (req: Request, res: Re
   } catch (error) { return next(error); }
 });
 
+// GET /api/lotes/:id/potreros — potreros del lote, con cuántos animales
+// activos aloja cada uno (para elegir el potrero al registrar un animal)
+enrutador.get('/:id/potreros', requerirPrivilegio('lotes.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const potreros = await prisma.potrero.findMany({
+      where: { loteId: req.params['id'] as string },
+      select: {
+        id: true, nombre: true, hectareas: true,
+        _count: { select: { animales: { where: { estado: 'ACTIVO' } } } },
+      },
+      orderBy: { nombre: 'asc' },
+    });
+    return respuestaExito(res, potreros);
+  } catch (error) { return next(error); }
+});
+
 // GET /api/lotes/:id — obtener lote
 enrutador.get('/:id', requerirPrivilegio('lotes.ver'), async (req: Request, res: Response, next: NextFunction) => {
   try {

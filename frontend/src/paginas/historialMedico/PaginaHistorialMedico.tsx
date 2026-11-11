@@ -230,10 +230,12 @@ export default function PaginaHistorialMedico() {
   const desdeFiltro    = searchParams.get('desde')    ?? undefined;
   const hastaFiltro    = searchParams.get('hasta')    ?? undefined;
 
-  useDebounce(busqueda, 400);
+  const busquedaDebounced = useDebounce(busqueda.trim(), 400);
+  // Al cambiar el texto se vuelve a la primera página de resultados
+  useEffect(() => { setPaginaActual(1); }, [busquedaDebounced]);
 
   const { data, isLoading } = useQuery<RespuestaHistorial>({
-    queryKey: ['historialMedico', paginaActual, animalIdFiltro, desdeFiltro, hastaFiltro],
+    queryKey: ['historialMedico', paginaActual, animalIdFiltro, busquedaDebounced, desdeFiltro, hastaFiltro],
     queryFn: () =>
       clienteHttp
         .get('/historial-medico', {
@@ -241,6 +243,7 @@ export default function PaginaHistorialMedico() {
             pagina: paginaActual,
             porPagina: 20,
             ...(animalIdFiltro && { animalId: animalIdFiltro }),
+            ...(busquedaDebounced && { busqueda: busquedaDebounced }),
             ...(desdeFiltro    && { desde: desdeFiltro }),
             ...(hastaFiltro    && { hasta: hastaFiltro }),
           },
@@ -350,7 +353,7 @@ export default function PaginaHistorialMedico() {
                   <Icono nombre="search" clase="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />
                   <input
                     type="text"
-                    placeholder="Buscar por animal (identificación o nombre)..."
+                    placeholder="Buscar por animal (identificación o nombre) o motivo..."
                     value={busqueda}
                     onChange={(e) => setBusqueda(e.target.value)}
                     className="campo-entrada pl-10"

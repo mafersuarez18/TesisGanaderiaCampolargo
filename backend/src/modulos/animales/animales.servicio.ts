@@ -61,11 +61,38 @@ export interface DatosCrearAnimal {
   observaciones?: string;
   procedencia?:   string;
   loteId:         string;
+  potreroId?:     string | null;
+  potreroNombre?: string;
+  potreroHectareas?: number;
   razaId:         string;
   padreId?:       string;
   madreId?:       string;
   // Nacimiento (registrado al cerrar un parto) del que proviene la cría.
   nacimientoId?:  string;
+}
+
+/**
+ * Potrero que corresponde guardar: uno existente del lote, o el escrito a
+ * mano (se reutiliza si ya hay uno con ese nombre en el lote; si no, se crea).
+ * Devuelve null para dejar el animal sin potrero.
+ */
+async function resolverPotrero(
+  loteId: string, potreroId?: string | null, potreroNombre?: string, hectareas?: number,
+): Promise<string | null> {
+  if (potreroNombre) {
+    const existente = await prisma.potrero.findFirst({
+      where: { loteId, nombre: { equals: potreroNombre, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (existente) return existente.id;
+    const nuevo = await prisma.potrero.create({ data: { nombre: potreroNombre, loteId, hectareas }, select: { id: true } });
+    return nuevo.id;
+  }
+  if (!potreroId) return null;
+  const potrero = await prisma.potrero.findUnique({ where: { id: potreroId }, select: { loteId: true } });
+  if (!potrero) throw new ErrorValidacionDatos('El potrero seleccionado no existe');
+  if (potrero.loteId !== loteId) throw new ErrorValidacionDatos('El potrero no pertenece al lote seleccionado');
+  return potreroId;
 }
 
 export async function servicioListarCriasPorRegistrar(fincaId?: string) {
@@ -108,11 +135,16 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
     if (madre.sexo !== 'HEMBRA') throw new ErrorValidacionDatos('La madre debe ser de sexo HEMBRA');
   }
 
-  const { loteId, razaId, padreId, madreId, nacimientoId: _nacimientoId, ...resto } = datos;
+  const {
+    loteId, razaId, padreId, madreId, nacimientoId: _nacimientoId,
+    potreroId: _p, potreroNombre, potreroHectareas, ...resto
+  } = datos;
+  const potreroId = await resolverPotrero(loteId, datos.potreroId, potreroNombre, potreroHectareas);
 
   return crearAnimal({
     ...resto,
     lote:  { connect: { id: loteId } },
+    ...(potreroId && { potrero: { connect: { id: potreroId } } }),
     raza:  { connect: { id: razaId } },
     ...(padreId && { padre: { connect: { id: padreId } } }),
     ...(madreId && { madre: { connect: { id: madreId } } }),
@@ -176,10 +208,21 @@ export async function servicioActualizarAnimal(
     }
   }
 
-  const { loteId, razaId, padreId, madreId, ...resto } = datos;
+  const { loteId, razaId, padreId, madreId, potreroId: potreroIdNuevo, potreroNombre, potreroHectareas, ...resto } = datos;
+
+  // El potrero pertenece al lote: si se indica uno se valida contra el lote
+  // final; si el animal cambia de lote sin indicar potrero, se le quita.
+  const loteFinal = loteId || animal.lote.id;
+  const cambiaPotrero = potreroIdNuevo !== undefined || !!potreroNombre;
+  const potreroFinal = cambiaPotrero
+    ? await resolverPotrero(loteFinal, potreroIdNuevo, potreroNombre, potreroHectareas)
+    : loteFinal !== animal.lote.id ? null : undefined;
 
   return actualizarAnimal(id, {
     ...resto,
+    ...(potreroFinal !== undefined && {
+      potrero: potreroFinal ? { connect: { id: potreroFinal } } : { disconnect: true },
+    }),
     ...(razaId  !== undefined && { raza: razaId ? { connect: { id: razaId } } : undefined }),
     ...(loteId  !== undefined && loteId && { lote: { connect: { id: loteId } } }),
     ...(padreId !== undefined && { padre: padreId ? { connect: { id: padreId } } : { disconnect: true } }),

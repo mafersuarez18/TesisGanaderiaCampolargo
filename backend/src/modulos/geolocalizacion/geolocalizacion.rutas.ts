@@ -8,7 +8,11 @@ import {
   controladorRegistrarUbicacion,
   controladorListarDispositivos,
   controladorImportarUbicaciones,
+  controladorCrearDispositivo,
+  controladorReporteMovilidad,
 } from './geolocalizacion.controlador';
+import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
+import { auditarExportacion } from '../reportes/reportes.rutas';
 
 const enrutador = Router();
 
@@ -26,12 +30,31 @@ enrutador.get('/historial/:animalId', verificarToken, requerirPrivilegio('geoloc
 // actividad y velocidad promedio calculados a partir del historial
 enrutador.get('/movilidad/:animalId', verificarToken, requerirPrivilegio('geolocalizacion.ver'), controladorMovilidad);
 
+// GET /api/geolocalizacion/movilidad/:animalId/pdf?desde=&hasta= — reporte
+// de movilidad imprimible (queda en auditoría como exportación)
+enrutador.get(
+  '/movilidad/:animalId/pdf',
+  verificarToken,
+  requerirPrivilegio('geolocalizacion.ver'),
+  (req, _res, next) => { auditarExportacion(req, `Exportación reporte de movilidad animal ID: ${req.params['animalId']}`); next(); },
+  controladorReporteMovilidad,
+);
+
 // POST /api/geolocalizacion/dispositivos/:apiKey/ubicacion — endpoint para
 // dispositivos GPS (autenticado por apiKey, no por sesión de usuario)
 enrutador.post('/dispositivos/:apiKey/ubicacion', controladorRegistrarUbicacion);
 
 // GET /api/geolocalizacion/dispositivos — listar dispositivos
 enrutador.get('/dispositivos', verificarToken, requerirPrivilegio('geolocalizacion.gestionar_dispositivos'), controladorListarDispositivos);
+
+// POST /api/geolocalizacion/dispositivos — registrar un collar y asignarlo
+enrutador.post(
+  '/dispositivos',
+  verificarToken,
+  requerirPrivilegio('geolocalizacion.gestionar_dispositivos'),
+  registrarAuditoria('Registrar dispositivo GPS', 'DispositivoGPS'),
+  controladorCrearDispositivo,
+);
 
 // POST /api/geolocalizacion/dispositivos/:id/importar — carga un reporte
 // CSV/XLS exportado desde la plataforma del fabricante (p. ej. Digitanimal)

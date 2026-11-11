@@ -74,6 +74,8 @@ export async function obtenerPrefillConsulta(animalId: string) {
 
 export interface FiltrosHistorial {
   animalId?: string;
+  // Texto libre: identificación o nombre del animal, o motivo de la consulta
+  busqueda?: string;
   fincaId?:  string;
   desde?:    Date;
   hasta?:    Date;
@@ -129,10 +131,17 @@ const seleccionHistorial = {
 } satisfies Prisma.HistorialMedicoSelect;
 
 export async function listarHistorialMedico(filtros: FiltrosHistorial = {}) {
-  const { animalId, fincaId, desde, hasta, pagina = 1, porPagina = 20 } = filtros;
+  const { animalId, busqueda, fincaId, desde, hasta, pagina = 1, porPagina = 20 } = filtros;
 
   const donde: Prisma.HistorialMedicoWhereInput = {
     ...(animalId && { animalId }),
+    ...(busqueda && {
+      OR: [
+        { animal: { numeroIdentificacion: { contains: busqueda, mode: 'insensitive' } } },
+        { animal: { nombre: { contains: busqueda, mode: 'insensitive' } } },
+        { motivoConsulta: { contains: busqueda, mode: 'insensitive' } },
+      ],
+    }),
     ...(fincaId  && { animal: { lote: { fincaId } } }),
     ...((desde || hasta) && {
       fechaConsulta: {

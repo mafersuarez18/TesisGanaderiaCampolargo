@@ -12,6 +12,7 @@ import {
   obtenerIndicadoresReproductivos,
   obtenerEfectividadInseminacion,
   listarServiciosPorConfirmar,
+  obtenerGestacion,
   confirmarServicio,
 } from './reproduccion.servicio';
 import {
@@ -57,6 +58,8 @@ const esquemaEvento = z.object({
   fechaInicioGestacion: z.coerce.date().optional(),
   fechaPartoEsperado:   z.coerce.date().optional(),
   padreId:              z.string().min(1).optional(),
+  // La hembra está vacía: cerrar lo pendiente y registrar
+  resolucionPrevia:     z.literal('VACIA').optional(),
 });
 
 const esquemaGestacion = z.object({
@@ -189,8 +192,11 @@ export async function controladorServiciosPorConfirmar(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const { fincaId } = z.object({ fincaId: z.string().min(1).optional() }).parse(req.query);
-    const servicios = await listarServiciosPorConfirmar(fincaId);
+    const { fincaId, tipo } = z.object({
+      fincaId: z.string().min(1).optional(),
+      tipo:    z.enum(['INSEMINACION_ARTIFICIAL', 'MONTA_NATURAL']).optional(),
+    }).parse(req.query);
+    const servicios = await listarServiciosPorConfirmar(fincaId, tipo);
     return respuestaExito(res, servicios);
   } catch (error) { return next(error); }
 }
@@ -209,5 +215,14 @@ export async function controladorConfirmarServicio(
     }).parse(req.body);
     const resultado = await confirmarServicio(req.params['id'] as string, datos, req.usuarioActual!.id);
     return respuestaExito(res, resultado);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorObtenerGestacion(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const gestacion = await obtenerGestacion(req.params['id'] as string);
+    return respuestaExito(res, gestacion);
   } catch (error) { return next(error); }
 }

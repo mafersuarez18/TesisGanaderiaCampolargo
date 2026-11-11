@@ -1,7 +1,8 @@
 import { Readable } from 'stream';
+import { randomBytes } from 'crypto';
 import ExcelJS from 'exceljs';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { ErrorNoAutorizado, ErrorNoEncontrado, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
+import { ErrorConflicto, ErrorNoAutorizado, ErrorNoEncontrado, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
 // ─── Posiciones actuales ───────────────────────────────────────────────────────
 
@@ -123,6 +124,42 @@ export async function listarDispositivos() {
   });
 }
 
+export interface DatosNuevoDispositivo {
+  codigoDispositivo: string;
+  animalId: string;
+  modelo?: string;
+  fabricante?: string;
+  frecuenciaActualizacion?: number; // segundos
+}
+
+/**
+ * Registra un collar y lo asigna a un animal. Nace sin señal: pasa a "en
+ * línea" cuando llega su primera posición (importada o por el endpoint).
+ */
+export async function crearDispositivo(datos: DatosNuevoDispositivo) {
+  const animal = await prisma.animal.findUnique({
+    where: { id: datos.animalId },
+    select: { estado: true, dispositivoGPS: { select: { codigoDispositivo: true } } },
+  });
+  if (!animal) throw new ErrorNoEncontrado('Animal no encontrado');
+  if (animal.estado !== 'ACTIVO') throw new ErrorValidacionDatos('Solo se puede asignar un collar a un animal activo');
+  if (animal.dispositivoGPS) {
+    throw new ErrorConflicto(`Este animal ya tiene asignado el collar ${animal.dispositivoGPS.codigoDispositivo}`);
+  }
+  const existente = await prisma.dispositivoGPS.findUnique({
+    where: { codigoDispositivo: datos.codigoDispositivo }, select: { id: true },
+  });
+  if (existente) throw new ErrorConflicto('Ya existe un dispositivo con ese código');
+
+  return prisma.dispositivoGPS.create({
+    data: {
+      ...datos,
+      estado: 'SIN_SEÑAL',
+      apiKey: randomBytes(24).toString('hex'),
+    },
+  });
+}
+
 // ─── Reporte de movilidad ──────────────────────────────────────────────────────
 // Distancia recorrida, tiempo de actividad y velocidad promedio de un animal,
 // calculados a partir de su historial de RegistroUbicacion. Este cálculo vivía
@@ -159,9 +196,11 @@ export async function obtenerMovilidadAnimal(animalId: string, filtros: FiltrosM
         },
       }),
     },
-    orderBy: { fechaRegistro: 'asc' },
+    // Las más recientes dentro del rango, devueltas en orden cronológico
+    orderBy: { fechaRegistro: 'desc' },
     take: limite,
   });
+  registros.reverse();
 
   if (registros.length === 0) {
     return {

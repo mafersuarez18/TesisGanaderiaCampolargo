@@ -15,6 +15,7 @@ import {
   controladorIndicadores,
   controladorEfectividadInseminacion,
   controladorServiciosPorConfirmar,
+  controladorObtenerGestacion,
   controladorConfirmarServicio,
 } from './reproduccion.controlador';
 
@@ -31,6 +32,9 @@ enrutador.get('/partos-proximos', requerirPrivilegio('reproduccion.ver'), contro
 
 // GET /api/reproduccion/gestaciones
 enrutador.get('/gestaciones', requerirPrivilegio('reproduccion.ver'), controladorGestacionesActivas);
+
+// GET /api/reproduccion/gestaciones/:id — detalle de una gestación
+enrutador.get('/gestaciones/:id', requerirPrivilegio('reproduccion.ver'), controladorObtenerGestacion);
 
 // POST /api/reproduccion/gestaciones
 enrutador.post(

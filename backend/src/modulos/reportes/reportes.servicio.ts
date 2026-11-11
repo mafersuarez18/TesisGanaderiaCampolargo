@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { Response } from 'express';
 import path from 'path';
 import { prisma } from '../../compartido/prisma/clientePrisma';
+import { obtenerMovilidadAnimal } from '../geolocalizacion/geolocalizacion.servicio';
 
 // Generación de reportes descargables (PDF con PDFKit, Excel con ExcelJS)
 // con una plantilla visual compartida: banda de encabezado con el logo,
@@ -1381,6 +1382,125 @@ export async function generarConsulta(res: Response, consultaId: string) {
        `${c.veterinario.nombre} ${c.veterinario.apellido}\n${c.veterinario.cargo ?? 'Médico Veterinario'}`,
        firmaX, firmaY + 4, { align: 'center', width: W - MR - firmaX },
      );
+
+  piePaginaPDF(doc);
+  doc.end();
+}
+// =============================================================================
+// REPORTE 7 — MOVILIDAD DE UN ANIMAL (GPS)
+// =============================================================================
+// Resumen del recorrido (distancia, tiempo, velocidad), desglose por día y el
+// registro de posiciones, para imprimir o archivar.
+export async function generarMovilidad(
+  res: Response,
+  animalId: string,
+  rango: { desde?: Date; hasta?: Date } = {},
+) {
+  const animal = await prisma.animal.findUnique({
+    where: { id: animalId },
+    select: {
+      numeroIdentificacion: true, nombre: true, sexo: true,
+      raza: { select: { nombre: true } },
+      lote: { select: { nombre: true, finca: { select: { nombre: true } } } },
+      dispositivoGPS: { select: { codigoDispositivo: true, modelo: true, fabricante: true, nivelBateria: true, ultimaConexion: true } },
+    },
+  });
+  if (!animal) {
+    res.status(404).json({ error: 'Animal no encontrado' });
+    return;
+  }
+
+  const movilidad = await obtenerMovilidadAnimal(animalId, { ...rango, limite: 1000 });
+  const puntos = movilidad.puntos;
+
+  const fmtFechaHora = (d: Date) =>
+    d.toLocaleString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const fmtDistancia = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
+  const fmtDuracion = (min: number) => (min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`);
+
+  const doc = new PDFDocument({ margin: ML, size: 'A4', bufferPages: true, autoFirstPage: true });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="movilidad_${animal.numeroIdentificacion}.pdf"`);
+  doc.pipe(res);
+
+  const nombreAnimal = animal.nombre ? `${animal.nombre}  —  #${animal.numeroIdentificacion}` : `#${animal.numeroIdentificacion}`;
+  const periodo = puntos.length
+    ? `${fmtFecha(rango.desde ?? puntos[0]!.fechaRegistro)} al ${fmtFecha(rango.hasta ?? puntos[puntos.length - 1]!.fechaRegistro)}`
+    : rango.desde || rango.hasta ? `${fmtFecha(rango.desde)} al ${fmtFecha(rango.hasta)}` : 'Sin registros';
+  encabezadoPDF(doc, 'Reporte de Movilidad', `${nombreAnimal}  ·  ${animal.lote?.finca?.nombre ?? '—'}  ·  Período: ${periodo}`);
+
+  seccionPDF(doc, 'Animal y dispositivo');
+  const ficha: [string, string | null | undefined][] = [
+    ['Animal', nombreAnimal],
+    ['Raza / sexo', `${animal.raza?.nombre ?? '—'}  ·  ${animal.sexo === 'MACHO' ? 'Macho' : 'Hembra'}`],
+    ['Finca / lote', `${animal.lote?.finca?.nombre ?? '—'}  ·  ${animal.lote?.nombre ?? '—'}`],
+    ['Collar GPS', animal.dispositivoGPS
+      ? [animal.dispositivoGPS.codigoDispositivo, animal.dispositivoGPS.fabricante, animal.dispositivoGPS.modelo].filter(Boolean).join('  ·  ')
+      : 'Sin collar asignado'],
+    ['Batería', animal.dispositivoGPS?.nivelBateria != null ? `${animal.dispositivoGPS.nivelBateria}%` : '—'],
+    ['Última señal', animal.dispositivoGPS?.ultimaConexion ? fmtFechaHora(animal.dispositivoGPS.ultimaConexion) : '—'],
+  ];
+  ficha.forEach(([k, v], i) => parKV(doc, k, v, i % 2 === 0));
+  doc.moveDown(0.8);
+
+  seccionPDF(doc, 'Resumen del recorrido');
+  tarjetasKPI(doc, [
+    ['Distancia recorrida', fmtDistancia(movilidad.distanciaMetros)],
+    ['Tiempo registrado', fmtDuracion(movilidad.duracionMinutos)],
+    ['Velocidad promedio', `${movilidad.velocidadPromedioKmH} km/h`],
+    ['Posiciones', String(movilidad.cantidadRegistros)],
+  ], 4);
+
+  if (!puntos.length) {
+    doc.fillColor(GRIS_SUAVE).font('Helvetica').fontSize(9)
+       .text('No hay posiciones registradas para este animal en el período indicado.', ML, doc.y);
+    piePaginaPDF(doc);
+    doc.end();
+    return;
+  }
+
+  // Desglose por día: distancia entre posiciones consecutivas del mismo día
+  const porDia = new Map<string, { fecha: Date; posiciones: number; distancia: number; velMax: number }>();
+  puntos.forEach((p, i) => {
+    const clave = p.fechaRegistro.toLocaleDateString('es-VE');
+    const dia = porDia.get(clave) ?? { fecha: p.fechaRegistro, posiciones: 0, distancia: 0, velMax: 0 };
+    dia.posiciones += 1;
+    dia.velMax = Math.max(dia.velMax, p.velocidad ?? 0);
+    const previo = puntos[i - 1];
+    if (previo && previo.fechaRegistro.toLocaleDateString('es-VE') === clave) {
+      const dLat = (p.latitud - previo.latitud) * Math.PI / 180;
+      const dLng = (p.longitud - previo.longitud) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(previo.latitud * Math.PI / 180) * Math.cos(p.latitud * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+      dia.distancia += 2 * 6_371_000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+    porDia.set(clave, dia);
+  });
+
+  doc.moveDown(0.4);
+  seccionPDF(doc, 'Movilidad por día');
+  tablaPDF(
+    doc,
+    ['Fecha', 'Posiciones', 'Distancia', 'Velocidad máx.'],
+    [...porDia.values()].map((d) => [
+      fmtFecha(d.fecha), String(d.posiciones), fmtDistancia(d.distancia), d.velMax ? `${d.velMax} km/h` : '—',
+    ]),
+    [120, 80, 100, 100],
+  );
+
+  doc.moveDown(0.6);
+  guardarEspacio(doc, 60);
+  seccionPDF(doc, `Registro de posiciones (${puntos.length})`);
+  tablaPDF(
+    doc,
+    ['#', 'Fecha / hora', 'Latitud', 'Longitud', 'Velocidad'],
+    puntos.map((p, i) => [
+      String(i + 1), fmtFechaHora(p.fechaRegistro), p.latitud.toFixed(6), p.longitud.toFixed(6),
+      p.velocidad == null ? '—' : p.velocidad > 0 ? `${p.velocidad} km/h` : 'Detenido',
+    ]),
+    [30, 120, 90, 90, 80],
+    16,
+  );
 
   piePaginaPDF(doc);
   doc.end();
