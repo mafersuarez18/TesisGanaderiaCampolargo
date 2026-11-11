@@ -20,7 +20,7 @@ interface ResumenDashboard {
   animalesPorRaza: Array<{ raza: string; total: number }>;
   alertasActivas: number;
   alertasCriticas: number;
-  partosProximos30Dias: number;
+  partosProximos60Dias: number;
   vacunasPendientes: number;
   enfermedadesActivas: number;
   indicadoresReproductivos: {
@@ -97,10 +97,10 @@ function construirExplicaciones(
       descripcion: 'Notificaciones generadas por el motor de alertas que todavía no se han leído, de todos los usuarios. "Críticas" son las de prioridad crítica.',
       calculo: resumen ? `${resumen.alertasActivas} sin leer, de las cuales ${resumen.alertasCriticas} son críticas` : undefined,
     },
-    partos30: {
-      titulo: 'Partos (30 días)',
-      descripcion: 'Gestaciones en curso cuya fecha probable de parto cae entre hoy y los próximos 30 días.',
-      calculo: resumen ? `${resumen.partosProximos30Dias} gestaciones con parto esperado en 30 días` : undefined,
+    partos60: {
+      titulo: 'Partos próximos (60 días)',
+      descripcion: 'Gestaciones en curso cuya fecha probable de parto cae entre hoy y los próximos 60 días.',
+      calculo: resumen ? `${resumen.partosProximos60Dias} gestaciones con parto esperado en los próximos 60 días` : undefined,
     },
     vacunasPendientes: {
       titulo: 'Vacunas Pendientes',
@@ -246,9 +246,9 @@ export default function PaginaDashboard() {
           />
           <TarjetaKPI
             icono="vaca_prenada"
-            etiqueta="Partos (30 días)"
-            explicacion={explicaciones.partos30}
-            valor={resumen?.partosProximos30Dias}
+            etiqueta="Partos próximos (60 días)"
+            explicacion={explicaciones.partos60}
+            valor={resumen?.partosProximos60Dias}
             colorIcono="text-secondary"
             fondoIcono="bg-secondary-container"
             cargando={isLoading}

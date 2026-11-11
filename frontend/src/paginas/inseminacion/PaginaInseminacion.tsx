@@ -8,6 +8,9 @@ import { clienteHttp } from '../../servicios/clienteAxios';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Badge from '../../componentes/ui/Badge';
 import Modal from '../../componentes/ui/Modal';
+import { useNavigate } from 'react-router-dom';
+import ModalDetalleEvento from '../../componentes/reproduccion/ModalDetalleEvento';
+import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
 import Icono from '../../componentes/ui/Icono';
 import Paginacion from '../../componentes/ui/Paginacion';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
@@ -33,8 +36,22 @@ interface Semental {
   origen: string | null;
   observaciones: string | null;
   motivilidad?: number | null;
-  raza: { nombre: string };
+  raza: { id?: string; nombre: string };
   _count: { inventariosSemen: number };
+}
+
+interface SementalDetalle extends Semental {
+  inventariosSemen: {
+    id: string; codigoDosis: string; cantidadDosis: number; cantidadUsada: number;
+    fechaColeccion: string | null; fechaVencimiento: string | null; motivilidad: number | null;
+  }[];
+  totalInseminaciones: number;
+  inseminacionesConGestacion: number;
+  dosisDisponibles: number;
+  ultimasInseminaciones: {
+    eventoId: string; fecha: string; estadoGestacion: string | null;
+    animal: { id: string; numeroIdentificacion: string; nombre: string | null };
+  }[];
 }
 
 interface LoteSemen {
@@ -121,9 +138,19 @@ export default function PaginaInseminacion() {
   const [modalIns,     setModalIns]     = useState(false);
   const [modalLote,    setModalLote]    = useState(false);
   const [modalSemental,setModalSemental]= useState(false);
+  // Semental que se edita (null = nuevo), se elimina o cuyo detalle se ve
+  const [sementalEditar,   setSementalEditar]   = useState<Semental | null>(null);
+  const [sementalEliminar, setSementalEliminar] = useState<Semental | null>(null);
+  const [sementalDetalle,  setSementalDetalle]  = useState<string | null>(null);
+  // Inseminación abierta desde el detalle de un semental (puede no estar en la página actual)
+  const [eventoSuelto,     setEventoSuelto]     = useState<string | null>(null);
   // Hembra con un servicio sin confirmar o preñada: se pregunta qué pasó
   const [conflicto,    setConflicto]    = useState<ConflictoReproductivo | null>(null);
   const [ultimoForm,   setUltimoForm]   = useState<FormInseminacion | null>(null);
+  // Inseminación de la lista cuyo detalle se está viendo
+  const [detalleIns,   setDetalleIns]   = useState<Inseminacion | null>(null);
+  const [aConfirmar,   setAConfirmar]   = useState<{ servicio: ServicioAConfirmar; prenada: boolean } | null>(null);
+  const navegar = useNavigate();
   // Inseminaciones a las que falta registrar si la hembra quedó preñada
   const { data: porConfirmar = [] } = useServiciosPorConfirmar('INSEMINACION_ARTIFICIAL');
 
@@ -280,7 +307,9 @@ export default function PaginaInseminacion() {
                 return (
                   <div
                     key={ins.id}
-                    className={`px-5 py-4 hover:bg-surface-container-low transition-colors
+                    onClick={() => setDetalleIns(ins)}
+                    title="Ver el detalle de la inseminación"
+                    className={`px-5 py-4 hover:bg-surface-container-low transition-colors cursor-pointer
                       ${idx < inseminaciones.length - 1 ? 'border-b border-outline-variant/15' : ''}`}
                   >
                     <div className="flex items-start gap-4">
@@ -505,7 +534,7 @@ export default function PaginaInseminacion() {
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
           {puedeRegistrar && (
             <div className="flex justify-end">
-              <button onClick={() => setModalSemental(true)} className="boton boton-secundario gap-2 text-sm">
+              <button onClick={() => { setSementalEditar(null); setModalSemental(true); }} className="boton boton-secundario gap-2 text-sm">
                 <Icono nombre="add" clase="text-[18px]" />
                 Registrar semental
               </button>
@@ -516,7 +545,14 @@ export default function PaginaInseminacion() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {sementales.map((sem) => (
-                <TarjetaSemental key={sem.id} semental={sem} />
+                <TarjetaSemental
+                  key={sem.id}
+                  semental={sem}
+                  puedeEditar={puedeRegistrar}
+                  onVer={() => setSementalDetalle(sem.id)}
+                  onEditar={() => { setSementalEditar(sem); setModalSemental(true); }}
+                  onEliminar={() => setSementalEliminar(sem)}
+                />
               ))}
             </div>
           )}
@@ -602,6 +638,31 @@ export default function PaginaInseminacion() {
         />
       </Modal>
 
+      <ModalDetalleEvento
+        eventoId={detalleIns?.id ?? eventoSuelto}
+        alCerrar={() => { setDetalleIns(null); setEventoSuelto(null); }}
+        alVerAnimal={(animalId) => navegar(`/animales/${animalId}`)}
+        // Si sigue pendiente de confirmar, desde el detalle se registra el resultado
+        alConfirmar={detalleIns && porConfirmar.some((s) => s.id === detalleIns.id) ? (prenada) => {
+          const ins = detalleIns;
+          setDetalleIns(null);
+          setAConfirmar({
+            prenada,
+            servicio: {
+              id: ins.id,
+              descripcion: `#${ins.animal.numeroIdentificacion}${ins.animal.nombre ? ` · ${ins.animal.nombre}` : ''}`,
+              fecha: ins.fecha,
+              tipo: 'INSEMINACION_ARTIFICIAL',
+            },
+          });
+        } : undefined}
+      />
+      <ModalConfirmarServicio
+        servicio={aConfirmar?.servicio ?? null}
+        prenadaInicial={aConfirmar?.prenada ?? true}
+        alCerrar={() => setAConfirmar(null)}
+      />
+
       <ModalSituacionReproductiva
         conflicto={conflicto}
         queSeRegistra="la inseminación"
@@ -629,14 +690,31 @@ export default function PaginaInseminacion() {
       <AnimatePresence>
         {modalSemental && (
           <ModalSemental
-            onCerrar={() => setModalSemental(false)}
+            semental={sementalEditar}
+            onCerrar={() => { setModalSemental(false); setSementalEditar(null); }}
             onExito={() => {
               qc.invalidateQueries({ queryKey: ['sementales'] });
+              qc.invalidateQueries({ queryKey: ['semental'] });
               setModalSemental(false);
+              setSementalEditar(null);
             }}
           />
         )}
       </AnimatePresence>
+
+      <ModalDetalleSemental
+        sementalId={sementalDetalle}
+        alCerrar={() => setSementalDetalle(null)}
+        alVerInseminacion={(eventoId) => { setSementalDetalle(null); setEventoSuelto(eventoId); }}
+      />
+      <ModalEliminarSemental
+        semental={sementalEliminar}
+        alCerrar={() => setSementalEliminar(null)}
+        alEliminar={() => {
+          qc.invalidateQueries({ queryKey: ['sementales'] });
+          setSementalEliminar(null);
+        }}
+      />
     </div>
   );
 }
@@ -652,12 +730,20 @@ function VacioPanel({ icono, texto, subtexto }: { icono: string; texto: string; 
   );
 }
 
-function TarjetaSemental({ semental }: { semental: Semental }) {
+function TarjetaSemental({ semental, puedeEditar, onVer, onEditar, onEliminar }: {
+  semental: Semental;
+  puedeEditar: boolean;
+  onVer: () => void;
+  onEditar: () => void;
+  onEliminar: () => void;
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="tarjeta-vidrio rounded-2xl p-5 space-y-3"
+      onClick={onVer}
+      title="Ver el detalle del semental"
+      className="tarjeta-vidrio rounded-2xl p-5 space-y-3 cursor-pointer hover:shadow-lg transition-shadow group"
     >
       <div className="flex items-start gap-3">
         <div className="w-12 h-12 rounded-2xl bg-secondary/10 flex items-center justify-center flex-shrink-0">
@@ -670,6 +756,17 @@ function TarjetaSemental({ semental }: { semental: Semental }) {
             <p className="text-[10px] text-outline font-mono mt-0.5">{semental.registro}</p>
           )}
         </div>
+        {puedeEditar && (
+          <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={onEditar} title="Editar" className="p-1.5 hover:bg-surface-container rounded-lg">
+              <Icono nombre="edit" clase="text-[16px] text-on-surface-variant" />
+            </button>
+            <button type="button" onClick={onEliminar} title="Eliminar" className="p-1.5 hover:bg-error-container rounded-lg">
+              <Icono nombre="delete" clase="text-[16px] text-on-surface-variant" />
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -1061,11 +1158,17 @@ function ModalLoteSemen({
 
 // ── Modal: Registrar semental ─────────────────────────────────────────────────
 
-function ModalSemental({ onCerrar, onExito }: { onCerrar: () => void; onExito: () => void }) {
+function ModalSemental({ semental, onCerrar, onExito }: {
+  /** Con un semental se edita; sin él, se registra uno nuevo. */
+  semental?: Semental | null;
+  onCerrar: () => void;
+  onExito: () => void;
+}) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    nombre: '', registro: '', razaId: '', razaNombreNueva: '', razaTipoCruce: '', razaOrigen: '',
-    origen: '', observaciones: '',
+    nombre: semental?.nombre ?? '', registro: semental?.registro ?? '', razaId: semental?.raza.id ?? '',
+    razaNombreNueva: '', razaTipoCruce: '', razaOrigen: '',
+    origen: semental?.origen ?? '', observaciones: semental?.observaciones ?? '',
   });
   const [error, setError] = useState('');
 
@@ -1087,6 +1190,16 @@ function ModalSemental({ onCerrar, onExito }: { onCerrar: () => void; onExito: (
         razaId = dataRaza.datos.id;
         qc.invalidateQueries({ queryKey: ['razas-select'] });
       }
+      if (semental) {
+        // Al editar, un campo vaciado se borra (null)
+        return clienteHttp.patch(`/inseminacion/sementales/${semental.id}`, {
+          nombre: form.nombre.trim(),
+          razaId,
+          registro: form.registro.trim() || null,
+          origen: form.origen.trim() || null,
+          observaciones: form.observaciones.trim() || null,
+        }, { descripcionOffline: 'Edición de semental' });
+      }
       return clienteHttp.post('/inseminacion/sementales', {
         nombre:  form.nombre.trim(),
         razaId,
@@ -1095,7 +1208,7 @@ function ModalSemental({ onCerrar, onExito }: { onCerrar: () => void; onExito: (
         ...(form.observaciones && { observaciones: form.observaciones }),
       }, { descripcionOffline: 'Nuevo semental' });
     },
-    onSuccess: () => { toast.success('Semental registrado correctamente'); onExito(); },
+    onSuccess: () => { toast.success(semental ? 'Semental actualizado correctamente' : 'Semental registrado correctamente'); onExito(); },
     onError: (e: any) => setError(e?.response?.data?.mensaje ?? 'Error al registrar el semental'),
   });
 
@@ -1116,7 +1229,7 @@ function ModalSemental({ onCerrar, onExito }: { onCerrar: () => void; onExito: (
           <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20">
             <h2 className="font-bold text-on-surface flex items-center gap-2">
               <Icono nombre="pets" relleno clase="text-[20px] text-secondary" />
-              Registrar semental
+              {semental ? 'Editar semental' : 'Registrar semental'}
             </h2>
             <button onClick={onCerrar} className="p-2 hover:bg-surface-container rounded-xl transition-colors">
               <Icono nombre="close" clase="text-[20px] text-on-surface-variant" />
@@ -1227,5 +1340,135 @@ function ModalSemental({ onCerrar, onExito }: { onCerrar: () => void; onExito: (
         </div>
       </motion.div>
     </>
+  );
+}
+
+// ── Modal: detalle del semental ───────────────────────────────────────────────
+
+const ESTADO_GESTACION_SEM: Record<string, { et: string; clase: string }> = {
+  EN_CURSO:          { et: 'Preñada', clase: 'bg-primary/10 text-primary' },
+  FINALIZADA_PARTO:  { et: 'Parió', clase: 'bg-primary/10 text-primary' },
+  FINALIZADA_ABORTO: { et: 'Abortó', clase: 'bg-error-container text-on-error-container' },
+  PERDIDA:           { et: 'Perdida', clase: 'bg-surface-container text-on-surface-variant' },
+};
+
+function ModalDetalleSemental({ sementalId, alCerrar, alVerInseminacion }: {
+  sementalId: string | null;
+  alCerrar: () => void;
+  alVerInseminacion: (eventoId: string) => void;
+}) {
+  const { data: s, isLoading } = useQuery<SementalDetalle>({
+    queryKey: ['semental', sementalId],
+    queryFn: () => clienteHttp.get(`/inseminacion/sementales/${sementalId}`).then((r) => r.data.datos),
+    enabled: !!sementalId,
+  });
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+  const efectividad = s && s.totalInseminaciones ? Math.round((s.inseminacionesConGestacion / s.totalInseminaciones) * 100) : null;
+
+  return (
+    <Modal abierto={!!sementalId} alCerrar={alCerrar} titulo={s?.nombre ?? 'Semental'}
+      descripcion={s ? `${s.raza.nombre}${s.registro ? ` · Registro ${s.registro}` : ''}` : undefined} tamano="xl">
+      {isLoading || !s ? (
+        <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="h-16 rounded-xl bg-surface-container animate-pulse" />)}</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { et: 'Lotes de semen', val: s._count.inventariosSemen },
+              { et: 'Dosis disponibles', val: s.dosisDisponibles },
+              { et: 'Inseminaciones', val: s.totalInseminaciones },
+              { et: 'Preñeces logradas', val: efectividad != null ? `${s.inseminacionesConGestacion} (${efectividad}%)` : '—' },
+            ].map((k) => (
+              <div key={k.et} className="rounded-xl bg-surface-container p-3">
+                <p className="text-lg font-bold text-on-surface">{k.val}</p>
+                <p className="text-[11px] text-on-surface-variant">{k.et}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-xl border border-outline-variant/30 p-3 text-sm space-y-1.5">
+            <p><span className="text-xs text-on-surface-variant">Origen / procedencia: </span>{s.origen ?? '—'}</p>
+            <p><span className="text-xs text-on-surface-variant">Observaciones: </span>{s.observaciones ?? '—'}</p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-2">Lotes de semen</p>
+            {s.inventariosSemen.length ? (
+              <div className="rounded-xl border border-outline-variant/30 divide-y divide-outline-variant/15 text-sm">
+                {s.inventariosSemen.map((l) => (
+                  <div key={l.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                    <span className="font-mono text-xs text-on-surface">{l.codigoDosis}</span>
+                    <span className="text-xs text-on-surface-variant">
+                      {Math.max(0, l.cantidadDosis - l.cantidadUsada)} de {l.cantidadDosis} dosis
+                      {l.motivilidad != null && ` · motilidad ${l.motivilidad}%`} · vence {fmt(l.fechaVencimiento)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-sm text-on-surface-variant italic">Sin lotes registrados.</p>}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-2">Últimas inseminaciones</p>
+            {s.ultimasInseminaciones.length ? (
+              <div className="rounded-xl border border-outline-variant/30 divide-y divide-outline-variant/15 text-sm">
+                {s.ultimasInseminaciones.map((i) => (
+                  <button key={i.eventoId} type="button" onClick={() => alVerInseminacion(i.eventoId)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-container-low">
+                    <span>
+                      <span className="text-on-surface font-medium">#{i.animal.numeroIdentificacion}</span>
+                      {i.animal.nombre && <span className="text-on-surface-variant"> · {i.animal.nombre}</span>}
+                      <span className="text-xs text-on-surface-variant"> · {fmt(i.fecha)}</span>
+                    </span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      i.estadoGestacion ? ESTADO_GESTACION_SEM[i.estadoGestacion]?.clase : 'bg-surface-container text-on-surface-variant'}`}>
+                      {i.estadoGestacion ? ESTADO_GESTACION_SEM[i.estadoGestacion]?.et ?? i.estadoGestacion : 'Sin preñez'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : <p className="text-sm text-on-surface-variant italic">Aún no se ha usado su semen.</p>}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── Modal: eliminar semental ──────────────────────────────────────────────────
+
+function ModalEliminarSemental({ semental, alCerrar, alEliminar }: {
+  semental: Semental | null;
+  alCerrar: () => void;
+  alEliminar: () => void;
+}) {
+  const mut = useMutation({
+    mutationFn: (id: string) => clienteHttp.delete(`/inseminacion/sementales/${id}`),
+    onSuccess: () => { toast.success('Semental eliminado correctamente'); alEliminar(); },
+    onError: (e: any) => toast.error(e?.response?.data?.mensaje ?? 'No se pudo eliminar el semental'),
+  });
+  const conLotes = (semental?._count.inventariosSemen ?? 0) > 0;
+  return (
+    <Modal abierto={!!semental} alCerrar={alCerrar} titulo="¿Eliminar semental?" tamano="sm">
+      {semental && (
+        <div className="space-y-4">
+          <p className="text-sm text-on-surface-variant">
+            {conLotes
+              ? <>No se puede eliminar <strong className="text-on-surface">{semental.nombre}</strong>: tiene {semental._count.inventariosSemen} lote(s) de semen
+                  registrados, que forman parte del historial de inseminaciones. Puede editarlo en su lugar.</>
+              : <>Se eliminará <strong className="text-on-surface">{semental.nombre}</strong> del catálogo. Esta acción no se puede deshacer.</>}
+          </p>
+          <div className="flex gap-3">
+            <button onClick={alCerrar} className="boton boton-secundario flex-1">{conLotes ? 'Entendido' : 'Cancelar'}</button>
+            {!conLotes && (
+              <button onClick={() => mut.mutate(semental.id)} disabled={mut.isPending}
+                className="boton flex-1 bg-error text-white hover:bg-error/90 disabled:opacity-50">
+                {mut.isPending ? 'Eliminando…' : 'Eliminar'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

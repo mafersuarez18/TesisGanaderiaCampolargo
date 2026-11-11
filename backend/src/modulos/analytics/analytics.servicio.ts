@@ -18,7 +18,7 @@ export async function obtenerResumenDashboard() {
     animalesPorRaza,
     alertasActivas,
     alertasCriticas,
-    partosProximos30Dias,
+    partosProximos60Dias,
     vacunasPendientes,
     enfermedadesActivas,
     gestacionesActivas,
@@ -58,12 +58,12 @@ export async function obtenerResumenDashboard() {
       where: { leida: false, prioridad: PrioridadAlerta.CRITICA },
     }),
 
-    // Gestaciones con parto esperado en los próximos 30 días
+    // Gestaciones con parto esperado en los próximos 60 días
     prisma.gestacion.count({
       where: {
         fechaPartoEsperado: {
           gte: new Date(),
-          lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          lte: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
         },
         estadoGestacion: EstadoGestacion.EN_CURSO,
       },
@@ -145,7 +145,7 @@ export async function obtenerResumenDashboard() {
     })),
     alertasActivas,
     alertasCriticas,
-    partosProximos30Dias,
+    partosProximos60Dias,
     vacunasPendientes,
     enfermedadesActivas,
     indicadoresReproductivos: {

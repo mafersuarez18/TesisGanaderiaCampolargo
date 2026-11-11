@@ -22,7 +22,7 @@ function clasesDias(dias: number): string {
 }
 
 async function obtenerPartosProximos(): Promise<PartoProximo[]> {
-  const { data } = await clienteHttp.get('/reproduccion/partos-proximos?dias=30&limite=5');
+  const { data } = await clienteHttp.get('/reproduccion/partos-proximos?dias=60&limite=5');
   return data.datos ?? [];
 }
 
@@ -56,7 +56,7 @@ export default function ListaPartosProximos() {
         <div className="w-10 h-10 bg-secondary/10 rounded-full flex items-center justify-center mx-auto mb-2">
           <Icono nombre="vaca_prenada" clase="text-[18px] text-secondary" />
         </div>
-        <p className="text-sm text-on-surface-variant">Sin partos en los próximos 30 días</p>
+        <p className="text-sm text-on-surface-variant">Sin partos en los próximos 60 días</p>
       </div>
     );
   }

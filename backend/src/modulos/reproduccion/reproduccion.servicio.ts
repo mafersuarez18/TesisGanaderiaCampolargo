@@ -310,7 +310,20 @@ export async function obtenerEventoReproductivo(id: string) {
       },
     });
   }
-  return { ...evento, gestacionCerrada };
+  // Servicio sin gestación: si ya se diagnosticó, el primer diagnóstico
+  // posterior dice cómo terminó (normalmente "no quedó preñada").
+  let diagnosticoPosterior = null;
+  if (TIPOS_SERVICIO.includes(evento.tipo) && !evento.gestacion) {
+    diagnosticoPosterior = await prisma.eventoReproductivo.findFirst({
+      where: { animalId: evento.animalId, tipo: TipoEventoReproductivo.DIAGNOSTICO_GESTACION, fecha: { gte: evento.fecha } },
+      orderBy: { fecha: 'asc' },
+      select: {
+        fecha: true, observaciones: true,
+        diagnosticoGestacion: { select: { resultado: true, metodoDiagnostico: true } },
+      },
+    });
+  }
+  return { ...evento, gestacionCerrada, diagnosticoPosterior };
 }
 
 export interface DatosCrearEvento {

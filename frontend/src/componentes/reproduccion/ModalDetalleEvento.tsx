@@ -41,6 +41,10 @@ interface DetalleEvento {
   } | null;
   gestacion?: { estadoGestacion: string; fechaPartoEsperado: string; fechaPartoReal?: string | null; padre?: AnimalCorto | null } | null;
   // Solo en partos y abortos: la gestación que se cerró y sus crías
+  diagnosticoPosterior?: {
+    fecha: string; observaciones?: string | null;
+    diagnosticoGestacion?: { resultado: string; metodoDiagnostico?: string | null } | null;
+  } | null;
   gestacionCerrada?: {
     fechaInicio: string; fechaPartoEsperado: string; observaciones?: string | null; padre?: AnimalCorto | null;
     nacimientos: Array<{
@@ -218,9 +222,18 @@ export default function ModalDetalleEvento({ eventoId, alCerrar, alVerAnimal, al
                     valor={fechaLarga(ev.gestacion.fechaPartoReal ?? ev.gestacion.fechaPartoEsperado)} />
                   <Fila etiqueta="Padre" valor={ev.gestacion.padre && etiquetaAnimal(ev.gestacion.padre)} />
                 </div>
+              ) : ev.diagnosticoPosterior ? (
+                <div className="py-1.5 space-y-1.5">
+                  <Badge variante={ev.diagnosticoPosterior.diagnosticoGestacion?.resultado === 'POSITIVO' ? 'verde' : 'rojo'} tamano="xs">
+                    {ev.diagnosticoPosterior.diagnosticoGestacion?.resultado === 'POSITIVO' ? 'Preñada' : 'No quedó preñada'}
+                  </Badge>
+                  <Fila etiqueta="Diagnóstico" valor={`${fechaLarga(ev.diagnosticoPosterior.fecha)}${
+                    ev.diagnosticoPosterior.diagnosticoGestacion?.metodoDiagnostico ? ` · ${ev.diagnosticoPosterior.diagnosticoGestacion.metodoDiagnostico}` : ''}`} />
+                  <Fila etiqueta="Nota" valor={ev.diagnosticoPosterior.observaciones} />
+                </div>
               ) : (
                 <p className="py-1.5 text-sm text-on-surface-variant">
-                  {alConfirmar ? 'Por confirmar: aún no se ha registrado si quedó preñada.' : 'Sin gestación asociada.'}
+                  Por confirmar: aún no se ha registrado si quedó preñada.
                 </p>
               )}
             </Seccion>

@@ -5,7 +5,7 @@ import { ClasificacionIA, TecnicaDeposicionSemen, NivelEstres } from '@prisma/cl
 import { verificarToken, requerirPrivilegio } from '../../compartido/middlewares/autenticacion';
 import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
 import { prisma } from '../../compartido/prisma/clientePrisma';
-import { respuestaExito, respuestaCreado, respuestaListado } from '../../compartido/utilidades/respuestaHttp';
+import { respuestaExito, respuestaCreado, respuestaListado, respuestaSinContenido } from '../../compartido/utilidades/respuestaHttp';
 import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/paginacion';
 import { ErrorNoEncontrado, ErrorConflicto, ErrorValidacionDatos } from '../../compartido/tipos/respuesta';
 
@@ -24,7 +24,7 @@ enrutador.get('/sementales', requerirPrivilegio('inseminacion.ver'), async (_req
   try {
     const sementales = await prisma.semental.findMany({
       include: {
-        raza: { select: { nombre: true } },
+        raza: { select: { id: true, nombre: true } },
         _count: { select: { inventariosSemen: true } },
       },
       orderBy: { nombre: 'asc' },
@@ -33,25 +33,119 @@ enrutador.get('/sementales', requerirPrivilegio('inseminacion.ver'), async (_req
   } catch (error) { return next(error); }
 });
 
+const esquemaSemental = z.object({
+  nombre:        z.string().trim().min(1, 'El nombre es requerido').max(200),
+  registro:      z.string().trim().max(100).nullable().optional(),
+  origen:        z.string().trim().max(200).nullable().optional(),
+  razaId:        z.string().min(1, 'Seleccione la raza'),
+  observaciones: z.string().trim().max(500).nullable().optional(),
+});
+
+const incluirSemental = {
+  raza: { select: { id: true, nombre: true } },
+  _count: { select: { inventariosSemen: true } },
+};
+
+// El número de registro oficial es único (si se indica)
+async function verificarRegistroLibre(registro: string | null | undefined, excluirId?: string) {
+  if (!registro) return;
+  const otro = await prisma.semental.findFirst({
+    where: { registro, ...(excluirId && { id: { not: excluirId } }) },
+    select: { nombre: true },
+  });
+  if (otro) throw new ErrorConflicto(`El registro ${registro} ya pertenece al semental ${otro.nombre}`);
+}
+
+// GET /api/inseminacion/sementales/:id — detalle: datos, lotes de semen y
+// resultados de sus inseminaciones
+enrutador.get('/sementales/:id', requerirPrivilegio('inseminacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params['id'] as string;
+    const semental = await prisma.semental.findUnique({
+      where: { id },
+      include: {
+        ...incluirSemental,
+        inventariosSemen: {
+          select: {
+            id: true, codigoDosis: true, cantidadDosis: true, cantidadUsada: true,
+            fechaColeccion: true, fechaVencimiento: true, motivilidad: true,
+          },
+          orderBy: { codigoDosis: 'asc' },
+        },
+      },
+    });
+    if (!semental) throw new ErrorNoEncontrado('Semental');
+
+    // Inseminaciones hechas con su semen y cuántas terminaron en gestación
+    const inseminaciones = await prisma.inseminacionArtificial.findMany({
+      where: { inventarioSemen: { sementalId: id } },
+      select: {
+        fechaInseminacion: true,
+        eventoReproductivo: {
+          select: {
+            id: true,
+            animal: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+            gestacion: { select: { estadoGestacion: true } },
+          },
+        },
+      },
+      orderBy: { fechaInseminacion: 'desc' },
+    });
+    const conGestacion = inseminaciones.filter((i) => i.eventoReproductivo.gestacion).length;
+
+    return respuestaExito(res, {
+      ...semental,
+      totalInseminaciones: inseminaciones.length,
+      inseminacionesConGestacion: conGestacion,
+      dosisDisponibles: semental.inventariosSemen.reduce((s, l) => s + Math.max(0, l.cantidadDosis - l.cantidadUsada), 0),
+      ultimasInseminaciones: inseminaciones.slice(0, 10).map((i) => ({
+        eventoId: i.eventoReproductivo.id,
+        fecha: i.fechaInseminacion,
+        animal: i.eventoReproductivo.animal,
+        estadoGestacion: i.eventoReproductivo.gestacion?.estadoGestacion ?? null,
+      })),
+    });
+  } catch (error) { return next(error); }
+});
+
 // POST /api/inseminacion/sementales — registrar semental
 enrutador.post('/sementales', requerirPrivilegio('inseminacion.crear'), registrarAuditoria('Registrar semental', 'Semental'), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const datos = z.object({
-      nombre:        z.string().min(1).max(200),
-      registro:      z.string().max(100).optional(),
-      origen:        z.string().max(200).optional(),
-      razaId:        z.string().min(1),
-      observaciones: z.string().max(500).optional(),
-    }).parse(req.body);
-
-    const semental = await prisma.semental.create({
-      data: datos,
-      include: {
-        raza: { select: { nombre: true } },
-        _count: { select: { inventariosSemen: true } },
-      },
-    });
+    const datos = esquemaSemental.parse(req.body);
+    await verificarRegistroLibre(datos.registro);
+    const semental = await prisma.semental.create({ data: datos, include: incluirSemental });
     return respuestaCreado(res, semental);
+  } catch (error) { return next(error); }
+});
+
+// PATCH /api/inseminacion/sementales/:id — editar semental
+enrutador.patch('/sementales/:id', requerirPrivilegio('inseminacion.crear'), registrarAuditoria('Actualizar semental', 'Semental'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params['id'] as string;
+    const datos = esquemaSemental.partial().parse(req.body);
+    const existe = await prisma.semental.findUnique({ where: { id }, select: { id: true } });
+    if (!existe) throw new ErrorNoEncontrado('Semental');
+    await verificarRegistroLibre(datos.registro, id);
+    const semental = await prisma.semental.update({ where: { id }, data: datos, include: incluirSemental });
+    return respuestaExito(res, semental);
+  } catch (error) { return next(error); }
+});
+
+// DELETE /api/inseminacion/sementales/:id — eliminar semental. Solo si no
+// tiene lotes de semen: esos lotes sostienen el historial de inseminaciones.
+enrutador.delete('/sementales/:id', requerirPrivilegio('inseminacion.crear'), registrarAuditoria('Eliminar semental', 'Semental'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params['id'] as string;
+    const semental = await prisma.semental.findUnique({ where: { id }, select: incluirSemental });
+    if (!semental) throw new ErrorNoEncontrado('Semental');
+    if (semental._count.inventariosSemen > 0) {
+      throw new ErrorConflicto(
+        `No se puede eliminar: tiene ${semental._count.inventariosSemen} lote(s) de semen registrados, `
+          + 'que forman parte del historial de inseminaciones.',
+      );
+    }
+    await prisma.semental.delete({ where: { id } });
+    return respuestaSinContenido(res);
   } catch (error) { return next(error); }
 });
 
