@@ -266,6 +266,10 @@ clienteHttp.interceptors.response.use(
 
       if (error.response?.status && error.response.status >= 500) {
         toast.error('Error del servidor. Por favor intente nuevamente.');
+      } else if (error.response?.status === 403 && solicitudOriginal?.method?.toLowerCase() === 'get') {
+        // Consulta de datos de un módulo para el que el rol no tiene
+        // privilegio (p. ej. un selector auxiliar): la pantalla simplemente
+        // queda sin esos datos, sin un aviso de error por cada consulta.
       } else if (error.response?.status !== 422
         // Un 409 con detalle lo resuelve la pantalla (p. ej. preguntando si la
         // hembra quedó preñada), no hace falta además el aviso de error

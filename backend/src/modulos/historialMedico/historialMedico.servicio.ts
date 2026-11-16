@@ -38,6 +38,124 @@ async function recalcularEstadoSanitarioAnimal(animalId: string): Promise<Estado
 // información epidemiológica), y sincroniza la desparasitación con el
 // calendario de vacunación correspondiente.
 
+// ─── Peso de referencia ───────────────────────────────────────────────────────
+
+export interface PesoReferencia {
+  peso: number;
+  fecha: Date;
+  // REGISTRO: peso con el que se registró el animal; CONSULTA: último pesaje
+  origen: 'REGISTRO' | 'CONSULTA';
+}
+
+/**
+ * Peso contra el que se mide la "ganancia de peso" de una consulta: el
+ * último pesaje registrado en una consulta (hasta la fecha indicada) o, si
+ * no hay ninguno, el peso con el que se registró el animal.
+ */
+export async function obtenerPesoReferencia(animalId: string, hasta?: Date): Promise<PesoReferencia | null> {
+  const ultimaConsulta = await prisma.historialMedico.findFirst({
+    where: { animalId, pesoResultante: { not: null }, ...(hasta && { fechaConsulta: { lte: hasta } }) },
+    orderBy: { fechaConsulta: 'desc' },
+    select: { pesoResultante: true, fechaConsulta: true },
+  });
+  if (ultimaConsulta?.pesoResultante != null) {
+    return { peso: ultimaConsulta.pesoResultante, fecha: ultimaConsulta.fechaConsulta, origen: 'CONSULTA' };
+  }
+  const animal = await prisma.animal.findUnique({
+    where: { id: animalId },
+    select: { pesoActual: true, fechaIngreso: true },
+  });
+  if (animal?.pesoActual == null) return null;
+  return { peso: animal.pesoActual, fecha: animal.fechaIngreso, origen: 'REGISTRO' };
+}
+
+// ─── Antecedentes del animal ──────────────────────────────────────────────────
+
+const fmtFechaCorta = (d: Date) => d.toLocaleDateString('es-VE', { timeZone: 'America/Caracas' });
+const ESTADO_TRATAMIENTO: Record<string, string> = {
+  EN_CURSO: 'en curso', COMPLETADO: 'completado, mejoró', FALLIDO: 'sin mejoría', SUSPENDIDO: 'suspendido',
+};
+
+/**
+ * Texto de anamnesis armado con el historial del animal, para precargar
+ * "Tratamientos previos" y "Cirugías y enfermedades previas" de una consulta
+ * nueva (el veterinario lo puede editar antes de guardar).
+ */
+async function armarAntecedentes(animalId: string) {
+  const [tratamientos, enfermedades, consultas] = await Promise.all([
+    prisma.tratamiento.findMany({
+      where: { historialMedico: { animalId } },
+      orderBy: { fechaInicio: 'desc' },
+      take: 10,
+      select: {
+        fechaInicio: true, dosis: true, viaAdministracion: true, frecuencia: true, duracionDias: true, estado: true,
+        medicamento: { select: { nombre: true } },
+        enfermedadDiagnosticada: { select: { nombreEnfermedad: true } },
+      },
+    }),
+    prisma.enfermedadDiagnosticada.findMany({
+      where: { historialMedico: { animalId } },
+      orderBy: { fechaInicio: 'desc' },
+      take: 10,
+      select: { nombreEnfermedad: true, fechaInicio: true, activa: true, fechaResolucion: true },
+    }),
+    prisma.historialMedico.findMany({
+      where: { animalId, cirugias: { not: null } },
+      select: { cirugias: true },
+    }),
+  ]);
+
+  const tratamientosPrevios = tratamientos.map((t) => {
+    const detalle = [t.dosis, t.viaAdministracion, t.frecuencia, t.duracionDias ? `${t.duracionDias} días` : null]
+      .filter(Boolean).join(', ');
+    return `${t.medicamento.nombre} (${detalle}) desde ${fmtFechaCorta(t.fechaInicio)}`
+      + `${t.enfermedadDiagnosticada ? ` para ${t.enfermedadDiagnosticada.nombreEnfermedad}` : ''}`
+      + ` — ${ESTADO_TRATAMIENTO[t.estado] ?? t.estado}`;
+  }).join('\n');
+
+  const enfermedadesPrevias = enfermedades.map((e) =>
+    `${e.nombreEnfermedad} (${e.activa ? `activa desde ${fmtFechaCorta(e.fechaInicio)}`
+      : `resuelta${e.fechaResolucion ? ` el ${fmtFechaCorta(e.fechaResolucion)}` : ''}`})`);
+  // Las cirugías vienen del texto que se anotó en consultas anteriores; se
+  // omiten las líneas que ya son una enfermedad listada arriba
+  const cirugias = [...new Set(consultas
+    .flatMap((c) => (c.cirugias ?? '').split('\n'))
+    .map((l) => l.trim())
+    .filter((l) => l && !enfermedadesPrevias.includes(l)))];
+
+  return {
+    tratamientosPrevios,
+    cirugiasYEnfermedades: [...cirugias, ...enfermedadesPrevias].join('\n'),
+  };
+}
+
+/**
+ * Datos para una consulta de seguimiento a partir de un tratamiento sin
+ * mejoría: la consulta de origen, la enfermedad que atendía (sigue activa)
+ * y un motivo propuesto.
+ */
+async function datosSeguimiento(tratamientoId: string) {
+  const t = await prisma.tratamiento.findUnique({
+    where: { id: tratamientoId },
+    select: {
+      estado: true,
+      medicamento: { select: { nombre: true } },
+      enfermedadDiagnosticada: { select: { id: true, nombreEnfermedad: true, activa: true } },
+      historialMedico: { select: { id: true, fechaConsulta: true, animalId: true } },
+    },
+  });
+  if (!t) throw new ErrorNoEncontrado(`Tratamiento con id '${tratamientoId}' no encontrado`);
+  return {
+    animalId: t.historialMedico.animalId,
+    consultaOrigenId: t.historialMedico.id,
+    fechaConsultaOrigen: t.historialMedico.fechaConsulta,
+    medicamento: t.medicamento.nombre,
+    enfermedad: t.enfermedadDiagnosticada?.activa ? t.enfermedadDiagnosticada : null,
+    motivo: `Seguimiento: no respondió a ${t.medicamento.nombre}`
+      + `${t.enfermedadDiagnosticada ? ` (${t.enfermedadDiagnosticada.nombreEnfermedad})` : ''}`,
+  };
+}
+
 // ─── Pre-fill de nueva consulta ───────────────────────────────────────────────
 
 /**
@@ -46,8 +164,13 @@ async function recalcularEstadoSanitarioAnimal(animalId: string): Promise<Estado
  *   - última desparasitación registrada (de cualquier consulta anterior)
  *   - calendarios de vacunación activos para saber si hay uno de "desparasitación"
  */
-export async function obtenerPrefillConsulta(animalId: string) {
-  const [animal, ultimaDesparasitacion, calendarios, enfermedadesActivas] = await Promise.all([
+export async function obtenerPrefillConsulta(animalIdIndicado?: string, tratamientoOrigenId?: string) {
+  // Consulta de seguimiento de un tratamiento sin mejoría
+  const seguimiento = tratamientoOrigenId ? await datosSeguimiento(tratamientoOrigenId) : null;
+  const animalId = seguimiento?.animalId ?? animalIdIndicado;
+  if (!animalId) throw new ErrorValidacionDatos('Indique el animal');
+
+  const [animal, ultimaDesparasitacion, calendarios, enfermedadesActivas, pesoReferencia, antecedentes] = await Promise.all([
     // Sexo del animal: el formulario solo habilita "litros de leche/día" en hembras lactantes
     prisma.animal.findUnique({ where: { id: animalId }, select: { sexo: true } }),
     // Última desparasitación del animal
@@ -67,14 +190,20 @@ export async function obtenerPrefillConsulta(animalId: string) {
       select: { id: true, nombreEnfermedad: true, fechaInicio: true },
       orderBy: { fechaInicio: 'desc' },
     }),
+    obtenerPesoReferencia(animalId),
+    armarAntecedentes(animalId),
   ]);
 
-  return { sexo: animal?.sexo ?? null, ultimaDesparasitacion, calendarios, enfermedadesActivas };
+  return {
+    animalId, sexo: animal?.sexo ?? null, ultimaDesparasitacion, calendarios, enfermedadesActivas, pesoReferencia,
+    antecedentes, seguimiento,
+  };
 }
 
 export interface FiltrosHistorial {
   animalId?: string;
-  // Texto libre: identificación o nombre del animal, o motivo de la consulta
+  // Texto libre: identificación o nombre del animal, motivo de la consulta o
+  // medicamento aplicado (tratamiento, desparasitación o vitamina)
   busqueda?: string;
   fincaId?:  string;
   desde?:    Date;
@@ -104,6 +233,7 @@ const seleccionHistorial = {
   estadoReproductivo: true,
   litrosLechesDiarios: true,
   gananciaPeso: true,
+  pesoResultante: true,
   // Diagnóstico y plan
   diagnosticoDefinitivo: true,
   resultadosPruebas: true,
@@ -128,6 +258,22 @@ const seleccionHistorial = {
   },
   informacionEpidemiologica: true,
   pruebasComplementarias: true,
+  consultaOrigen: { select: { id: true, fechaConsulta: true, motivoConsulta: true } },
+  seguimientos: { select: { id: true, fechaConsulta: true, motivoConsulta: true }, orderBy: { fechaConsulta: 'asc' } },
+  desparasitaciones: {
+    select: {
+      id: true, tipo: true, fecha: true, dosis: true, via: true, observaciones: true,
+      medicamento: { select: { nombre: true, principioActivo: true } },
+    },
+    orderBy: { fecha: 'asc' },
+  },
+  vitaminas: {
+    select: {
+      id: true, fecha: true, dosis: true, via: true, observaciones: true,
+      medicamento: { select: { nombre: true, principioActivo: true } },
+    },
+    orderBy: { fecha: 'asc' },
+  },
 } satisfies Prisma.HistorialMedicoSelect;
 
 export async function listarHistorialMedico(filtros: FiltrosHistorial = {}) {
@@ -140,6 +286,11 @@ export async function listarHistorialMedico(filtros: FiltrosHistorial = {}) {
         { animal: { numeroIdentificacion: { contains: busqueda, mode: 'insensitive' } } },
         { animal: { nombre: { contains: busqueda, mode: 'insensitive' } } },
         { motivoConsulta: { contains: busqueda, mode: 'insensitive' } },
+        { tratamientos: { some: { medicamento: { nombre: { contains: busqueda, mode: 'insensitive' } } } } },
+        { tratamientos: { some: { medicamento: { principioActivo: { contains: busqueda, mode: 'insensitive' } } } } },
+        { desparasitaciones: { some: { medicamento: { nombre: { contains: busqueda, mode: 'insensitive' } } } } },
+        { desparasitaciones: { some: { medicamento: { principioActivo: { contains: busqueda, mode: 'insensitive' } } } } },
+        { vitaminas: { some: { medicamento: { nombre: { contains: busqueda, mode: 'insensitive' } } } } },
       ],
     }),
     ...(fincaId  && { animal: { lote: { fincaId } } }),
@@ -181,6 +332,8 @@ export interface DatosCrearHistorial {
   sintomasObservados?:   string;
   observaciones?:        string;
   veterinarioId:         string;
+  // Consulta de seguimiento: la consulta anterior cuyo tratamiento no funcionó
+  consultaOrigenId?:     string;
   actualizarEstadoSanitario?: EstadoSanitario;
   // Estado sanitario evaluado en esta consulta puntual
   estadoSanitario?:      EstadoSanitario;
@@ -288,15 +441,31 @@ export async function crearHistorialMedico(datos: DatosCrearHistorial) {
 
   const {
     enfermedades, tratamientos, veterinarioId, animalId, actualizarEstadoSanitario,
-    informacionEpidemiologica, desparasitaciones, vitaminas, pruebasComplementarias,
+    informacionEpidemiologica, desparasitaciones, vitaminas, pruebasComplementarias, consultaOrigenId,
     ...restoHistorial
   } = datos;
+
+  if (consultaOrigenId) {
+    const origen = await prisma.historialMedico.findUnique({ where: { id: consultaOrigenId }, select: { animalId: true } });
+    if (!origen || origen.animalId !== animalId) {
+      throw new ErrorValidacionDatos('La consulta de origen no pertenece a este animal');
+    }
+  }
+
+  // Peso resultante = último pesaje (o peso de registro) + ganancia
+  let pesoResultante: number | undefined;
+  if (datos.gananciaPeso != null) {
+    const referencia = await obtenerPesoReferencia(animalId, datos.fechaConsulta);
+    if (referencia) pesoResultante = Math.round((referencia.peso + datos.gananciaPeso) * 10) / 10;
+  }
 
   const historial = await prisma.historialMedico.create({
     data: {
       ...restoHistorial,
+      pesoResultante,
       animal:      { connect: { id: animalId } },
       veterinario: { connect: { id: veterinarioId } },
+      ...(consultaOrigenId && { consultaOrigen: { connect: { id: consultaOrigenId } } }),
       enfermedades: enfermedades?.length
         ? {
             create: enfermedades.map((enf) => ({
@@ -404,6 +573,7 @@ export async function crearHistorialMedico(datos: DatosCrearHistorial) {
             animal:      { connect: { id: animalId } },
             medicamento: { connect: { id: d.medicamentoId } },
             veterinario: { connect: { id: veterinarioId } },
+            historialMedico: { connect: { id: historial.id } },
           },
           include: { medicamento: { select: { nombre: true, principioActivo: true } } },
         }),
@@ -434,7 +604,9 @@ export async function crearHistorialMedico(datos: DatosCrearHistorial) {
               proximaFecha,
               dosis:                d.dosis,
               viaAdministracion:    d.via,
-              observaciones:        d.observaciones ?? `Auto-registrado desde consulta${nombreMedicamento ? `: ${nombreMedicamento}` : ''}`,
+              // Solo el desparasitante: las vitaminas de la consulta tienen su propio registro
+              observaciones:        d.observaciones ?? `Desparasitación registrada en consulta médica${nombreMedicamento ? ` (${nombreMedicamento})` : ''}`,
+              medicamento:          { connect: { id: d.medicamentoId } },
               animal:               { connect: { id: animalId } },
               calendarioVacunacion: { connect: { id: calendario.id } },
               aplicadoPor:          { connect: { id: veterinarioId } },
@@ -464,6 +636,7 @@ export async function crearHistorialMedico(datos: DatosCrearHistorial) {
             animal:      { connect: { id: animalId } },
             medicamento: { connect: { id: v.medicamentoId } },
             veterinario: { connect: { id: veterinarioId } },
+            historialMedico: { connect: { id: historial.id } },
           },
           include: { medicamento: { select: { nombre: true } } },
         }),
@@ -471,7 +644,7 @@ export async function crearHistorialMedico(datos: DatosCrearHistorial) {
     );
   }
 
-  return { ...historial, desparasitaciones: desparasitacionesCreadas, vitaminas: vitaminasCreadas };
+  return { ...historial, desparasitaciones: desparasitacionesCreadas, vitaminas: vitaminasCreadas, pesoResultante: pesoResultante ?? null };
 }
 
 export interface DatosFinalizarTratamiento {
@@ -536,12 +709,33 @@ export async function finalizarTratamiento(tratamientoId: string, datos: DatosFi
  * al crear la consulta, el resultado puede quedar en blanco y completarse
  * luego con actualizarPruebaComplementaria.
  */
+// ─── Consulta abierta / cerrada ───────────────────────────────────────────────
+// Una consulta ya registrada solo se puede completar (agregar enfermedades,
+// tratamientos, notas o pruebas) mientras tenga al menos una prueba
+// complementaria pendiente de resultado. Al registrar el resultado de la
+// última, en ese mismo paso se agregan los diagnósticos y tratamientos que
+// indiquen los exámenes, y la consulta queda cerrada.
+
+const MENSAJE_CONSULTA_CERRADA =
+  'La consulta está cerrada: solo se puede completar mientras tenga una prueba complementaria pendiente de resultado.';
+
+async function contarPruebasPendientes(historialMedicoId: string) {
+  return prisma.pruebaComplementaria.count({
+    where: { historialMedicoId, OR: [{ resultado: null }, { resultado: '' }] },
+  });
+}
+
+async function asegurarConsultaAbierta(historialMedicoId: string) {
+  const historial = await prisma.historialMedico.findUnique({ where: { id: historialMedicoId }, select: { id: true } });
+  if (!historial) throw new ErrorNoEncontrado(`Historial médico con id '${historialMedicoId}' no encontrado`);
+  if (await contarPruebasPendientes(historialMedicoId) === 0) throw new ErrorConflicto(MENSAJE_CONSULTA_CERRADA);
+}
+
 export async function agregarPruebaComplementaria(
   historialMedicoId: string,
   datos: { tipo: TipoPruebaComplementaria; fecha?: Date; resultado?: string; observaciones?: string },
 ) {
-  const historial = await prisma.historialMedico.findUnique({ where: { id: historialMedicoId }, select: { id: true } });
-  if (!historial) throw new ErrorNoEncontrado(`Historial médico con id '${historialMedicoId}'`);
+  await asegurarConsultaAbierta(historialMedicoId);
 
   return prisma.pruebaComplementaria.create({
     data: {
@@ -558,28 +752,81 @@ export interface DatosActualizarPruebaComplementaria {
   fecha?:         Date | null;
   resultado?:     string | null;
   observaciones?: string | null;
+  // Lo que indiquen los resultados, registrado en el mismo paso
+  enfermedades?:  NonNullable<DatosCrearHistorial['enfermedades']>;
+  tratamientos?:  Array<NonNullable<DatosCrearHistorial['tratamientos']>[number] & {
+    // Posición, en `enfermedades`, del diagnóstico nuevo que atiende
+    indiceEnfermedadNueva?: number;
+  }>;
 }
 
 /**
- * Registra (o corrige) el resultado de una prueba complementaria después de
- * creada la consulta: los exámenes de laboratorio suelen tardar días, así
- * que la prueba se guarda primero sin resultado y se completa al llegar.
- * Solo se tocan los campos enviados; un string vacío deja el campo en null.
+ * Registra el resultado de una prueba complementaria pendiente (los
+ * exámenes de laboratorio suelen tardar días, así que la prueba se guarda
+ * primero sin resultado) junto con los diagnósticos y tratamientos que
+ * indiquen. Todo en una transacción: si era la última prueba pendiente, la
+ * consulta queda cerrada. Un resultado ya registrado no se modifica.
  */
 export async function actualizarPruebaComplementaria(id: string, datos: DatosActualizarPruebaComplementaria) {
-  const prueba = await prisma.pruebaComplementaria.findUnique({ where: { id }, select: { id: true } });
+  const prueba = await prisma.pruebaComplementaria.findUnique({
+    where: { id },
+    select: { id: true, resultado: true, historialMedicoId: true, historialMedico: { select: { animalId: true } } },
+  });
   if (!prueba) throw new ErrorNoEncontrado(`Prueba complementaria con id '${id}'`);
+  if (prueba.resultado?.trim()) {
+    throw new ErrorConflicto('Esta prueba ya tiene su resultado registrado y no se puede modificar.');
+  }
+  const resultado = datos.resultado?.trim();
+  if (!resultado && (datos.enfermedades?.length || datos.tratamientos?.length)) {
+    throw new ErrorValidacionDatos('Registre el resultado de la prueba para agregar diagnósticos o tratamientos.');
+  }
 
+  const { historialMedicoId } = prueba;
+  const animalId = prueba.historialMedico.animalId;
   const vacioANull = (v: string | null | undefined) => (v === undefined ? undefined : v?.trim() || null);
 
-  return prisma.pruebaComplementaria.update({
-    where: { id },
-    data: {
-      fecha:         datos.fecha,
-      resultado:     vacioANull(datos.resultado),
-      observaciones: vacioANull(datos.observaciones),
-    },
+  const actualizada = await prisma.$transaction(async (tx) => {
+    const enfermedadesNuevas = [];
+    for (const enf of datos.enfermedades ?? []) {
+      enfermedadesNuevas.push(await tx.enfermedadDiagnosticada.create({
+        data: { ...enf, historialMedicoId, fechaActualizacion: new Date() },
+        select: { id: true },
+      }));
+    }
+    const diagnosticosConsulta = await tx.enfermedadDiagnosticada.findMany({ where: { historialMedicoId }, select: { id: true } });
+
+    for (const { indiceEnfermedadNueva, ...t } of datos.tratamientos ?? []) {
+      let enfermedadDiagnosticadaId = t.enfermedadDiagnosticadaId
+        ?? (indiceEnfermedadNueva != null ? enfermedadesNuevas[indiceEnfermedadNueva]?.id : undefined);
+      if (t.enfermedadDiagnosticadaId) {
+        const enfermedad = await tx.enfermedadDiagnosticada.findFirst({
+          where: { id: t.enfermedadDiagnosticadaId, historialMedico: { animalId } }, select: { id: true },
+        });
+        if (!enfermedad) throw new ErrorConflicto('El diagnóstico indicado no pertenece a este animal');
+      } else if (!enfermedadDiagnosticadaId && diagnosticosConsulta.length === 1) {
+        enfermedadDiagnosticadaId = diagnosticosConsulta[0]!.id;
+      }
+      await tx.tratamiento.create({
+        data: {
+          dosis: t.dosis, viaAdministracion: t.viaAdministracion, frecuencia: t.frecuencia,
+          duracionDias: t.duracionDias, fechaInicio: t.fechaInicio, observaciones: t.observaciones,
+          descripcion: t.descripcion, historialMedicoId, medicamentoId: t.medicamentoId, enfermedadDiagnosticadaId,
+        },
+      });
+    }
+
+    return tx.pruebaComplementaria.update({
+      where: { id },
+      data: {
+        fecha:         datos.fecha,
+        resultado:     vacioANull(datos.resultado),
+        observaciones: vacioANull(datos.observaciones),
+      },
+    });
   });
+
+  if (datos.enfermedades?.length || datos.tratamientos?.length) await recalcularEstadoSanitarioAnimal(animalId);
+  return { ...actualizada, consultaCerrada: (await contarPruebasPendientes(historialMedicoId)) === 0 };
 }
 
 // ─── Completar una consulta ya registrada ─────────────────────────────────────
@@ -603,6 +850,7 @@ async function obtenerAnimalDeConsulta(historialMedicoId: string): Promise<strin
 /** Agrega un diagnóstico (enfermedad) a una consulta ya registrada. */
 export async function agregarEnfermedadDiagnosticada(historialMedicoId: string, datos: DatosDiagnostico) {
   const animalId = await obtenerAnimalDeConsulta(historialMedicoId);
+  await asegurarConsultaAbierta(historialMedicoId);
 
   const enfermedad = await prisma.enfermedadDiagnosticada.create({
     data: { ...datos, historialMedicoId, fechaActualizacion: new Date() },
@@ -618,8 +866,9 @@ export async function agregarEnfermedadDiagnosticada(historialMedicoId: string, 
  * un string vacío deja el campo en null.
  */
 export async function actualizarEnfermedadDiagnosticada(id: string, datos: Partial<DatosDiagnostico>) {
-  const existente = await prisma.enfermedadDiagnosticada.findUnique({ where: { id }, select: { id: true } });
+  const existente = await prisma.enfermedadDiagnosticada.findUnique({ where: { id }, select: { id: true, historialMedicoId: true } });
   if (!existente) throw new ErrorNoEncontrado(`Diagnóstico con id '${id}' no encontrado`);
+  await asegurarConsultaAbierta(existente.historialMedicoId);
 
   const vacioANull = (v: string | undefined) => (v === undefined ? undefined : v.trim() || null);
 
@@ -653,6 +902,7 @@ export async function agregarTratamiento(
   datos: NonNullable<DatosCrearHistorial['tratamientos']>[number],
 ) {
   const animalId = await obtenerAnimalDeConsulta(historialMedicoId);
+  await asegurarConsultaAbierta(historialMedicoId);
 
   let enfermedadDiagnosticadaId = datos.enfermedadDiagnosticadaId;
   if (enfermedadDiagnosticadaId) {
@@ -697,6 +947,7 @@ export async function agregarObservacionConsulta(
   texto: string,
   autor: { nombre: string; apellido: string },
 ) {
+  await asegurarConsultaAbierta(historialMedicoId);
   const historial = await prisma.historialMedico.findUnique({
     where: { id: historialMedicoId },
     select: { observaciones: true },

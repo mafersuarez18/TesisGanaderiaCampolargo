@@ -47,9 +47,10 @@ interface FormLote {
 const formVacio: FormLote = { nombre: '', descripcion: '', capacidad: '', fincaId: '' };
 
 export default function PaginaLotes() {
-  const { esAdministrador, esVeterinario } = useAutenticacion();
+  const { tienePrivilegio } = useAutenticacion();
   const cliente = useQueryClient();
-  const puedeEditar = esAdministrador || esVeterinario;
+  const puedeEditar = tienePrivilegio('lotes.crear', 'lotes.editar');
+  const puedeEliminarLotes = tienePrivilegio('lotes.eliminar');
 
   const [fincaFiltro, setFincaFiltro] = useState<string>('');
   const [modalAbierto, setModalAbierto] = useState(false);
@@ -198,7 +199,7 @@ export default function PaginaLotes() {
         <SeccionPotreros
           fincas={fincas}
           puedeEditar={puedeEditar}
-          puedeEliminar={esAdministrador}
+          puedeEliminar={puedeEliminarLotes}
           loteInicial={lotePotreros}
         />
       )}
@@ -290,7 +291,7 @@ export default function PaginaLotes() {
                       >
                         <Icono nombre="edit" clase="text-[16px] text-on-surface-variant hover:text-primary" />
                       </button>
-                      {esAdministrador && (
+                      {puedeEliminarLotes && (
                         <button
                           onClick={() => setLoteEliminar(lote)}
                           className="p-1.5 hover:bg-error-container rounded-lg transition-colors"

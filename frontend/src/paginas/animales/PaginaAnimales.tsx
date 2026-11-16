@@ -170,8 +170,8 @@ async function obtenerRazas(): Promise<Raza[]> {
 
 export default function PaginaAnimales() {
   const navegar = useNavigate();
-  const { esAdministrador, esVeterinario, tienePrivilegio } = useAutenticacion();
-  const puedeCrear = esAdministrador || esVeterinario;
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeCrear = tienePrivilegio('animales.crear');
   const puedeExportar = tienePrivilegio('reportes.generar');
 
   const [pagina, setPagina]             = useState(1);

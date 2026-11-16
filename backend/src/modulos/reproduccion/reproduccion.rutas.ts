@@ -1,4 +1,6 @@
-﻿import { Router } from 'express';
+﻿import { Router, Request, Response, NextFunction } from 'express';
+import { evaluarEdadReproductiva } from './reproduccion.servicio';
+import { respuestaExito } from '../../compartido/utilidades/respuestaHttp';
 import {
   verificarToken,
   requerirPrivilegio,
@@ -22,6 +24,15 @@ import {
 const enrutador = Router();
 
 enrutador.use(verificarToken);
+
+// GET /api/reproduccion/aptitud/:animalId?fecha= — ¿la hembra tiene la edad
+// mínima recomendable para un servicio? (se usa también desde Inseminación)
+enrutador.get('/aptitud/:animalId', requerirPrivilegio('reproduccion.ver', 'inseminacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const fecha = typeof req.query['fecha'] === 'string' && req.query['fecha'] ? new Date(req.query['fecha']) : new Date();
+    return respuestaExito(res, await evaluarEdadReproductiva(req.params['animalId'] as string, isNaN(fecha.getTime()) ? new Date() : fecha));
+  } catch (error) { return next(error); }
+});
 
 // El orden importa: las rutas con segmento fijo (/partos-proximos,
 // /gestaciones, /indicadores...) deben declararse antes de "/:id" para que
@@ -59,7 +70,7 @@ enrutador.get('/servicios-por-confirmar', requerirPrivilegio('reproduccion.ver')
 // PATCH /api/reproduccion/servicios/:id/confirmar — preñada o vacía
 enrutador.patch(
   '/servicios/:id/confirmar',
-  requerirPrivilegio('reproduccion.crear'),
+  requerirPrivilegio('reproduccion.crear', 'inseminacion.crear'),
   registrarAuditoria('Confirmar resultado de servicio reproductivo', 'EventoReproductivo'),
   controladorConfirmarServicio,
 );

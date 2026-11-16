@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import BarraLateral from './BarraLateral';
 import BarraSuperior from './BarraSuperior';
 import Icono from '../ui/Icono';
+import { useAutenticacion } from '../../hooks/useAutenticacion';
+import { PRIVILEGIOS_MODULO, useSincronizarPermisos } from './permisos';
 
 const navMovil = [
   { etiqueta: 'Dashboard', ruta: '/dashboard', icono: 'dashboard' },
@@ -18,6 +20,13 @@ const navMovil = [
 export default function LayoutPrincipal() {
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false);
   const ubicacion = useLocation();
+  const { tienePrivilegio } = useAutenticacion();
+  // Rol y privilegios siempre al día con lo que configure el administrador
+  useSincronizarPermisos();
+  const navMovilVisible = navMovil.filter((item) => {
+    const requeridos = PRIVILEGIOS_MODULO[item.ruta];
+    return !requeridos || tienePrivilegio(...requeridos);
+  });
 
   return (
     <div className="flex min-h-screen bg-surface">
@@ -74,7 +83,7 @@ export default function LayoutPrincipal() {
       {/* Barra de navegación inferior — solo móvil */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-surface-container-low/95 backdrop-blur-xl
                       border-t border-outline-variant/20 px-2 py-2 flex justify-around items-center z-30">
-        {navMovil.map((item) => {
+        {navMovilVisible.map((item) => {
           const estaActivo = ubicacion.pathname === item.ruta ||
             (item.ruta !== '/dashboard' && ubicacion.pathname.startsWith(item.ruta));
           return (

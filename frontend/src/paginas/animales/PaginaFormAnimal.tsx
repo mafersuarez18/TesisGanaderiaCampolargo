@@ -19,6 +19,16 @@ import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
 // el formulario despliega los campos para darla de alta ahí mismo antes de
 // enviar el animal. Con ?nacimiento=<id> registra una cría de "Crías por
 // registrar": se rellena con los datos del parto y queda enlazada a él.
+// Propósitos del animal; Leche y Doble propósito solo aplican a hembras
+const PROPOSITOS: { valor: string; etiqueta: string }[] = [
+  { valor: 'CARNE',        etiqueta: 'Carne' },
+  { valor: 'LECHE',        etiqueta: 'Leche' },
+  { valor: 'CARNE_LECHE',  etiqueta: 'Doble propósito' },
+  { valor: 'REPRODUCCION', etiqueta: 'Reproducción' },
+  { valor: 'TAUROMAQUIA',  etiqueta: 'Tauromaquia' },
+];
+const PROPOSITOS_SOLO_HEMBRA: string[] = ['LECHE', 'CARNE_LECHE'];
+
 const esquemaAnimal = z.object({
   numeroIdentificacion:      z.string().min(1, 'La identificación es requerida').max(50),
   tipoIdentificacion: z.enum(['ARETE', 'HIERRO_NUMERO', 'MICROCHIP', 'OTRO']).default('ARETE'),
@@ -50,6 +60,9 @@ const esquemaAnimal = z.object({
   padreId:          z.string().min(1).optional().or(z.literal('')),
   madreId:          z.string().min(1).optional().or(z.literal('')),
 }).superRefine((datos, ctx) => {
+  if (datos.sexo === 'MACHO' && PROPOSITOS_SOLO_HEMBRA.includes(datos.proposito)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['proposito'], message: 'Un macho no puede tener propósito Leche ni Doble propósito' });
+  }
   if (!datos.razaId && !datos.razaNombreNueva) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['razaId'], message: 'Seleccione o escriba una raza' });
   }
@@ -116,6 +129,15 @@ export default function PaginaFormAnimal() {
   });
 
   const fincaSeleccionada = watch('fincaId');
+  const sexoActual = watch('sexo');
+  const propositoActual = watch('proposito');
+  // Al pasar a macho, un propósito exclusivo de hembras (Leche, Doble
+  // propósito) se limpia para no guardar una combinación inválida.
+  useEffect(() => {
+    if (sexoActual === 'MACHO' && PROPOSITOS_SOLO_HEMBRA.includes(propositoActual)) {
+      setValue('proposito', '' as FormularioAnimal['proposito']);
+    }
+  }, [sexoActual, propositoActual, setValue]);
   const loteSeleccionado = watch('loteId');
   const razaIdActual = watch('razaId');
   const razaNombreNuevaActual = watch('razaNombreNueva');
@@ -165,7 +187,8 @@ export default function PaginaFormAnimal() {
       tipoIdentificacion: 'ARETE',
       numeroIdentificacion: '',
       ...(cria.sexoCria && { sexo: cria.sexoCria }),
-      proposito:       madre.proposito as FormularioAnimal['proposito'],
+      proposito:       (cria.sexoCria === 'MACHO' && PROPOSITOS_SOLO_HEMBRA.includes(madre.proposito)
+        ? '' : madre.proposito) as FormularioAnimal['proposito'],
       fechaNacimiento: fechaLocalISO(new Date(cria.fechaNacimiento)),
       pesoActual:      cria.pesoAlNacer ?? '',
       fincaId:         madre.lote.finca.id,
@@ -423,12 +446,13 @@ export default function PaginaFormAnimal() {
             <CampoForm etiqueta="Propósito *" error={errors.proposito?.message}>
               <select {...register('proposito')} className="campo-entrada">
                 <option value="">Seleccionar...</option>
-                <option value="CARNE">Carne</option>
-                <option value="LECHE">Leche</option>
-                <option value="CARNE_LECHE">Doble propósito</option>
-                <option value="REPRODUCCION">Reproducción</option>
-                <option value="TAUROMAQUIA">Tauromaquia</option>
+                {PROPOSITOS
+                  .filter((p) => sexoActual !== 'MACHO' || !PROPOSITOS_SOLO_HEMBRA.includes(p.valor))
+                  .map((p) => <option key={p.valor} value={p.valor}>{p.etiqueta}</option>)}
               </select>
+              {sexoActual === 'MACHO' && (
+                <p className="text-[11px] text-on-surface-variant mt-1">Leche y Doble propósito solo aplican a hembras.</p>
+              )}
             </CampoForm>
           </div>
         </SeccionFormulario>

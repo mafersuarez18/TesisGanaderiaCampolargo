@@ -19,6 +19,8 @@ import ModalSituacionReproductiva, {
 } from '../../componentes/reproduccion/ModalSituacionReproductiva';
 import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
 import { fechaLocalISO, isoMediodia } from '../../servicios/fechas';
+import { useAutenticacion } from '../../hooks/useAutenticacion';
+import AvisoEdadReproductiva from '../../componentes/reproduccion/AvisoEdadReproductiva';
 
 // Ciclo reproductivo: servicios (inseminación/monta) por confirmar, partos
 // próximos, eventos (celo, monta, diagnóstico de gestación, parto...) e
@@ -117,6 +119,8 @@ const TIPOS_PARA_FILTRO = [
 
 export default function PaginaReproduccion() {
   const navegar = useNavigate();
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeRegistrar = tienePrivilegio('reproduccion.crear');
   const queryClient = useQueryClient();
   // ?animalId=… (al venir desde la ficha de un animal): abre el historial de
   // eventos reproductivos filtrado por ese animal.
@@ -286,13 +290,15 @@ export default function PaginaReproduccion() {
           ))}
         </div>
 
-        <button
-          onClick={() => setMostrarForm(true)}
-          className="boton boton-primario gap-2 text-sm"
-        >
-          <Icono nombre="add" clase="text-[18px]" />
-          Nuevo evento
-        </button>
+        {puedeRegistrar && (
+          <button
+            onClick={() => setMostrarForm(true)}
+            className="boton boton-primario gap-2 text-sm"
+          >
+            <Icono nombre="add" clase="text-[18px]" />
+            Nuevo evento
+          </button>
+        )}
       </div>
 
       <AnimatePresence mode="wait">
@@ -1000,6 +1006,10 @@ function FormularioEvento({ servicios, onCerrar, onExito }: {
                 <p className="text-[11px] text-on-surface-variant mt-1">
                   Es un macho: solo se le pueden registrar destete o descarte reproductivo.
                 </p>
+              )}
+              {/* Servicios (IA o monta) en una hembra por debajo de la edad mínima recomendable */}
+              {sexoAnimal === 'HEMBRA' && ['INSEMINACION_ARTIFICIAL', 'MONTA_NATURAL'].includes(form.tipo) && (
+                <div className="mt-2"><AvisoEdadReproductiva animalId={form.animalId} fecha={form.fecha} /></div>
               )}
             </div>
 

@@ -16,6 +16,7 @@ import Paginacion from '../../componentes/ui/Paginacion';
 import SelectorRaza from '../../componentes/ui/SelectorRaza';
 import CampoFecha from '../../componentes/ui/CampoFecha';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
+import AvisoEdadReproductiva from '../../componentes/reproduccion/AvisoEdadReproductiva';
 import { invalidarSeguimientoReproductivo } from '../../componentes/reproduccion/seguimientoReproductivo';
 import ListaServiciosPorConfirmar, { useServiciosPorConfirmar } from '../../componentes/reproduccion/ListaServiciosPorConfirmar';
 import ModalSituacionReproductiva, {
@@ -128,8 +129,8 @@ type FormInseminacion = z.infer<typeof esquemaInseminacion>;
 
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function PaginaInseminacion() {
-  const { esAdministrador, esVeterinario } = useAutenticacion();
-  const puedeRegistrar = esAdministrador || esVeterinario;
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeRegistrar = tienePrivilegio('inseminacion.crear');
   const qc = useQueryClient();
 
   const [pestaña,      setPestaña]      = useState<'inseminaciones' | 'porConfirmar' | 'inventario' | 'sementales' | 'efectividad'>('inseminaciones');
@@ -643,7 +644,7 @@ export default function PaginaInseminacion() {
         alCerrar={() => { setDetalleIns(null); setEventoSuelto(null); }}
         alVerAnimal={(animalId) => navegar(`/animales/${animalId}`)}
         // Si sigue pendiente de confirmar, desde el detalle se registra el resultado
-        alConfirmar={detalleIns && porConfirmar.some((s) => s.id === detalleIns.id) ? (prenada) => {
+        alConfirmar={puedeRegistrar && detalleIns && porConfirmar.some((s) => s.id === detalleIns.id) ? (prenada) => {
           const ins = detalleIns;
           setDetalleIns(null);
           setAConfirmar({
@@ -810,7 +811,7 @@ function GrupoIA({ titulo, children }: { titulo: string; children: React.ReactNo
 }
 
 function FormularioInseminacion({ lotes, onSubmit }: PropsFormInseminacion) {
-  const { register, control, handleSubmit, formState: { errors } } = useForm<FormInseminacion>({
+  const { register, control, handleSubmit, watch, formState: { errors } } = useForm<FormInseminacion>({
     resolver: zodResolver(esquemaInseminacion),
     defaultValues: { numeroIntento: 1, fecha: new Date().toISOString().split('T')[0] },
   });
@@ -831,6 +832,7 @@ function FormularioInseminacion({ lotes, onSubmit }: PropsFormInseminacion) {
           error={errors.receptoraId?.message}
         />
       )} />
+      {watch('receptoraId') && <AvisoEdadReproductiva animalId={watch('receptoraId')} fecha={watch('fecha')} />}
 
       {/* Lote de semen */}
       <CampoForm etiqueta="Lote de semen *" error={errors.inventarioSemenId?.message}>

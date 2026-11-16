@@ -83,6 +83,16 @@ export async function cerrarSesion(req: Request, res: Response): Promise<void> {
   respuestaExito(res, null, 'Sesión cerrada correctamente');
 }
 
+// Datos de la sesión con el rol y los privilegios vigentes: el frontend lo
+// consulta periódicamente para reflejar cambios hechos por un administrador
+// (mismo formato que el usuario devuelto al iniciar sesión).
 export async function obtenerPerfil(req: Request, res: Response): Promise<void> {
-  respuestaExito(res, req.usuarioActual, 'Perfil obtenido correctamente');
+  const usuario = await prisma.usuario.findUniqueOrThrow({
+    where: { id: req.usuarioActual!.id },
+    select: {
+      id: true, nombre: true, apellido: true, correo: true, cargo: true,
+      rol: { select: { id: true, nombre: true, descripcion: true } },
+    },
+  });
+  respuestaExito(res, { ...usuario, privilegios: req.usuarioActual!.privilegios }, 'Perfil obtenido correctamente');
 }

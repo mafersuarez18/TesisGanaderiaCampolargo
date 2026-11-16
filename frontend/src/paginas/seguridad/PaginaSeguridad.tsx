@@ -7,10 +7,13 @@ import Badge, { BadgeRol } from '../../componentes/ui/Badge';
 import Modal, { ModalConfirmacion } from '../../componentes/ui/Modal';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Icono from '../../componentes/ui/Icono';
+import { QUERY_PERFIL_SESION } from '../../componentes/layout/permisos';
+import ModalDetalleUsuario from './ModalDetalleUsuario';
 
-// Administración de usuarios, roles y sus privilegios — página restringida
-// a administradores (ver requerirPrivilegio('roles.gestionar') /
-// 'usuarios.*' en el backend).
+// Administración de usuarios, roles y sus privilegios. Cada pestaña y acción
+// se muestra según los privilegios 'usuarios.*' y 'roles.gestionar' (los
+// mismos que exige el backend). Tras cualquier cambio se refrescan los
+// permisos de la sesión, por si el cambio afecta al propio usuario.
 interface Rol {
   id: string;
   nombre: string;
@@ -74,7 +77,11 @@ function etiquetaPrivilegio(codigo: string): { modulo: string; accion: string } 
 }
 
 export default function PaginaSeguridad() {
-  const [pestana, setPestana] = useState<'usuarios' | 'roles'>('usuarios');
+  const { tienePrivilegio } = useAutenticacion();
+  const verUsuarios = tienePrivilegio('usuarios.ver');
+  const verRoles = tienePrivilegio('roles.gestionar');
+  const [pestanaElegida, setPestana] = useState<'usuarios' | 'roles'>('usuarios');
+  const pestana = !verUsuarios ? 'roles' : !verRoles ? 'usuarios' : pestanaElegida;
 
   return (
     <div className="space-y-6">
@@ -96,9 +103,9 @@ export default function PaginaSeguridad() {
 
       <div className="flex gap-1 p-1 bg-surface-container rounded-xl overflow-x-auto max-w-full">
         {([
-          { valor: 'usuarios', etiqueta: 'Usuarios', icono: 'group' },
-          { valor: 'roles',    etiqueta: 'Roles y privilegios', icono: 'admin_panel_settings' },
-        ] as const).map((t) => (
+          { valor: 'usuarios', etiqueta: 'Usuarios', icono: 'group', visible: verUsuarios },
+          { valor: 'roles',    etiqueta: 'Roles y privilegios', icono: 'admin_panel_settings', visible: verRoles },
+        ] as const).filter((t) => t.visible).map((t) => (
           <button
             key={t.valor}
             onClick={() => setPestana(t.valor)}
@@ -123,8 +130,12 @@ export default function PaginaSeguridad() {
 
 function PanelUsuarios() {
   const queryClient = useQueryClient();
-  const { usuario: usuarioActual } = useAutenticacion();
+  const { usuario: usuarioActual, tienePrivilegio } = useAutenticacion();
+  const puedeCrear  = tienePrivilegio('usuarios.crear');
+  const puedeEditar = tienePrivilegio('usuarios.editar');
+  const puedeBloquear = tienePrivilegio('usuarios.editar', 'usuarios.desbloquear');
 
+  const [usuarioDetalle, setUsuarioDetalle]   = useState<string | null>(null);
   const [mostrarForm, setMostrarForm]         = useState(false);
   const [usuarioEditar, setUsuarioEditar]     = useState<Usuario | null>(null);
   const [usuarioBloquear, setUsuarioBloquear] = useState<{ id: string; bloqueado: boolean } | null>(null);
@@ -151,6 +162,7 @@ function PanelUsuarios() {
       clienteHttp.patch(`/usuarios/${id}`, { estado: bloqueado ? 'BLOQUEADO' : 'ACTIVO' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
+      queryClient.invalidateQueries({ queryKey: ['usuario-detalle'] });
       setUsuarioBloquear(null);
     },
   });
@@ -165,13 +177,15 @@ function PanelUsuarios() {
         <p className="text-sm text-on-surface-variant">
           <span className="font-medium text-on-surface">{totalUsuarios}</span> usuarios registrados
         </p>
-        <button
-          onClick={() => { setUsuarioEditar(null); setMostrarForm(true); }}
-          className="boton boton-primario gap-2 text-sm"
-        >
-          <Icono nombre="person_add" clase="text-[18px]" />
-          Nuevo usuario
-        </button>
+        {puedeCrear && (
+          <button
+            onClick={() => { setUsuarioEditar(null); setMostrarForm(true); }}
+            className="boton boton-primario gap-2 text-sm"
+          >
+            <Icono nombre="person_add" clase="text-[18px]" />
+            Nuevo usuario
+          </button>
+        )}
       </div>
 
       <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${Math.max(roles.length, 1)}, minmax(0, 1fr))` }}>
@@ -260,7 +274,9 @@ function PanelUsuarios() {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.03 }}
-              className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-6 py-4
+              onClick={() => setUsuarioDetalle(u.id)}
+              title="Ver toda la información y privilegios del usuario"
+              className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 items-center px-6 py-4 cursor-pointer
                          hover:bg-surface-container-low transition-colors
                          ${idx < usuarios.length - 1 ? 'border-b border-outline-variant/15' : ''}`}
             >
@@ -294,15 +310,24 @@ function PanelUsuarios() {
                   : '—'}
               </span>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => { setUsuarioEditar(u); setMostrarForm(true); }}
-                  title="Editar"
+                  onClick={() => setUsuarioDetalle(u.id)}
+                  title="Ver detalle"
                   className="p-1.5 text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
                 >
-                  <Icono nombre="edit" clase="text-[16px]" />
+                  <Icono nombre="visibility" clase="text-[16px]" />
                 </button>
-                {u.id !== usuarioActual?.id && (
+                {puedeEditar && (
+                  <button
+                    onClick={() => { setUsuarioEditar(u); setMostrarForm(true); }}
+                    title="Editar"
+                    className="p-1.5 text-outline hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                  >
+                    <Icono nombre="edit" clase="text-[16px]" />
+                  </button>
+                )}
+                {puedeBloquear && u.id !== usuarioActual?.id && (
                   <button
                     onClick={() => setUsuarioBloquear({ id: u.id, bloqueado: u.estado !== 'BLOQUEADO' })}
                     title={u.estado === 'BLOQUEADO' ? 'Desbloquear' : 'Bloquear'}
@@ -332,12 +357,26 @@ function PanelUsuarios() {
             onCerrar={() => { setMostrarForm(false); setUsuarioEditar(null); }}
             onExito={() => {
               queryClient.invalidateQueries({ queryKey: ['usuarios'] });
+              queryClient.invalidateQueries({ queryKey: ['usuario-detalle'] });
+              queryClient.invalidateQueries({ queryKey: ['roles'] });
+              queryClient.invalidateQueries({ queryKey: QUERY_PERFIL_SESION });
               setMostrarForm(false);
               setUsuarioEditar(null);
             }}
           />
         )}
       </AnimatePresence>
+
+      {/* Modal: ficha completa del usuario */}
+      <ModalDetalleUsuario
+        usuarioId={usuarioDetalle}
+        alCerrar={() => setUsuarioDetalle(null)}
+        alEditar={puedeEditar ? () => {
+          const u = usuarios.find((x) => x.id === usuarioDetalle);
+          setUsuarioDetalle(null);
+          if (u) { setUsuarioEditar(u); setMostrarForm(true); }
+        } : undefined}
+      />
 
       {/* Modal: Bloquear / Desbloquear */}
       <ModalConfirmacion
@@ -635,6 +674,9 @@ function PanelRoles() {
             onCerrar={() => setRolEditar(null)}
             onExito={() => {
               queryClient.invalidateQueries({ queryKey: ['roles'] });
+              queryClient.invalidateQueries({ queryKey: ['usuario-detalle'] });
+              // Si el rol editado es el propio, el menú y los botones cambian ya
+              queryClient.invalidateQueries({ queryKey: QUERY_PERFIL_SESION });
               setRolEditar(null);
             }}
           />

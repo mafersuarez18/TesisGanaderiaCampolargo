@@ -26,6 +26,13 @@ import {
 // de sexo entre padre/madre y cría, y protección contra el borrado de
 // animales que ya tienen historial médico o reproductivo asociado.
 
+// Leche y doble propósito solo tienen sentido en hembras
+function validarPropositoSegunSexo(sexo?: Sexo, proposito?: TipoPropositoAnimal) {
+  if (sexo === 'MACHO' && (proposito === 'LECHE' || proposito === 'CARNE_LECHE')) {
+    throw new ErrorValidacionDatos('Un macho no puede tener propósito Leche ni Doble propósito');
+  }
+}
+
 export async function servicioListarAnimales(filtros: FiltrosAnimal) {
   return listarAnimales(filtros);
 }
@@ -33,9 +40,20 @@ export async function servicioListarAnimales(filtros: FiltrosAnimal) {
 export async function servicioObtenerAnimal(id: string) {
   const animal = await obtenerAnimalPorId(id);
   if (!animal) throw new ErrorNoEncontrado(`Animal con id '${id}' no encontrado`);
-  const registrosVacunacion = await contarVacunacionesPorAnimal(id);
+  const [registrosVacunacion, ultimoPesaje] = await Promise.all([
+    contarVacunacionesPorAnimal(id),
+    // Último pesaje registrado en una consulta médica (peso de registro + ganancias)
+    prisma.historialMedico.findFirst({
+      where: { animalId: id, pesoResultante: { not: null } },
+      orderBy: { fechaConsulta: 'desc' },
+      select: { pesoResultante: true, fechaConsulta: true, gananciaPeso: true },
+    }),
+  ]);
   return {
     ...animal,
+    ultimoPesaje: ultimoPesaje
+      ? { peso: ultimoPesaje.pesoResultante, fecha: ultimoPesaje.fechaConsulta, ganancia: ultimoPesaje.gananciaPeso }
+      : null,
     _count: { ...animal._count, registrosVacunacion },
   };
 }
@@ -109,6 +127,7 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
   if (await existeAreteRegistrado(datos.numeroIdentificacion)) {
     throw new ErrorConflicto(`Ya existe un animal registrado con esa identificación: '${datos.numeroIdentificacion}'`);
   }
+  validarPropositoSegunSexo(datos.sexo, datos.proposito);
 
   // Al registrar una cría desde "Crías por registrar", se enlaza con su
   // nacimiento y se toman de él la madre, la fecha y el peso al nacer.
@@ -170,6 +189,7 @@ export async function servicioActualizarAnimal(
 ) {
   const animal = await obtenerAnimalPorId(id);
   if (!animal) throw new ErrorNoEncontrado(`Animal con id '${id}' no encontrado`);
+  validarPropositoSegunSexo(datos.sexo ?? animal.sexo, datos.proposito ?? animal.proposito);
 
   if (datos.numeroIdentificacion && datos.numeroIdentificacion !== animal.numeroIdentificacion) {
     if (await existeAreteRegistrado(datos.numeroIdentificacion, id)) {

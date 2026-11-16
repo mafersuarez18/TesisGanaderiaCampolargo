@@ -42,9 +42,9 @@ export default function PaginaDetalleAnimal() {
   const { id } = useParams<{ id: string }>();
   const navegar = useNavigate();
   const cliente = useQueryClient();
-  const { esAdministrador, esVeterinario } = useAutenticacion();
-  const puedeEditar  = esAdministrador || esVeterinario;
-  const puedeEliminar = esAdministrador;
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeEditar  = tienePrivilegio('animales.editar');
+  const puedeEliminar = tienePrivilegio('animales.eliminar');
 
   const [modalEliminar, setModalEliminar] = useState(false);
 
@@ -212,8 +212,21 @@ export default function PaginaDetalleAnimal() {
             <CampoDetalle etiqueta="Edad">
               {animal.fechaNacimiento ? calcularEdad(animal.fechaNacimiento) : '—'}
             </CampoDetalle>
-            <CampoDetalle etiqueta="Peso registrado">
+            <CampoDetalle etiqueta="Peso de registro">
               {animal.pesoActual ? `${animal.pesoActual} kg` : '—'}
+            </CampoDetalle>
+            {/* Último pesaje: peso resultante de la consulta médica más reciente
+                (peso de registro o pesaje anterior + ganancia registrada) */}
+            <CampoDetalle etiqueta="Último pesaje">
+              {animal.ultimoPesaje?.peso != null ? (
+                <span>
+                  {animal.ultimoPesaje.peso} kg
+                  <span className="block text-[11px] font-normal text-on-surface-variant">
+                    {new Date(animal.ultimoPesaje.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    {animal.ultimoPesaje.ganancia != null && ` · ${animal.ultimoPesaje.ganancia > 0 ? '+' : ''}${animal.ultimoPesaje.ganancia} kg`}
+                  </span>
+                </span>
+              ) : 'Sin pesajes en consultas'}
             </CampoDetalle>
           </dl>
         </div>

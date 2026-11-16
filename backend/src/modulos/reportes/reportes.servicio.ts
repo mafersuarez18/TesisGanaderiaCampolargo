@@ -1020,7 +1020,7 @@ export async function generarHistorialAnimal(res: Response, animalId: string) {
     return;
   }
 
-  const [consultas, desparasitacionesAnimal] = await Promise.all([
+  const [consultas, desparasitacionesAnimal, vitaminasAnimal] = await Promise.all([
     prisma.historialMedico.findMany({
       where: { animalId },
       include: {
@@ -1038,7 +1038,15 @@ export async function generarHistorialAnimal(res: Response, animalId: string) {
       include: { medicamento: { select: { nombre: true, principioActivo: true } } },
       orderBy: { fecha: 'desc' },
     }),
+    // Vitaminas: historial propio, separado de las desparasitaciones
+    prisma.registroVitaminas.findMany({
+      where: { animalId },
+      include: { medicamento: { select: { nombre: true, principioActivo: true } } },
+      orderBy: { fecha: 'desc' },
+    }),
   ]);
+  // consultas viene ordenado de la más reciente a la más antigua
+  const ultimoPesaje = consultas.find((c) => c.pesoResultante != null);
 
   const doc = new PDFDocument({ margin: ML, size: 'A4', bufferPages: true, autoFirstPage: true });
   res.setHeader('Content-Type', 'application/pdf');
@@ -1062,7 +1070,8 @@ export async function generarHistorialAnimal(res: Response, animalId: string) {
     ['Finca',            animal.lote?.finca?.nombre ?? '—'],
     ['Lote',             animal.lote?.nombre  ?? '—'],
     ['Fecha nacimiento', fmtFechaLarga(animal.fechaNacimiento)],
-    ['Peso actual',      animal.pesoActual != null ? `${animal.pesoActual} kg` : '—'],
+    ['Peso de registro', animal.pesoActual != null ? `${animal.pesoActual} kg` : '—'],
+    ['Último pesaje',    ultimoPesaje ? `${ultimoPesaje.pesoResultante} kg (${fmtFecha(ultimoPesaje.fechaConsulta)})` : '—'],
     ['Color',            animal.color ?? '—'],
     ['Estado sanitario', etiquetaEnum(animal.estadoSanitario)],
   ];
@@ -1115,6 +1124,9 @@ export async function generarHistorialAnimal(res: Response, animalId: string) {
     if (c.movimientosRuminales != null)   vitales.push(`Rum: ${c.movimientosRuminales}/min`);
     if (c.condicionCorporal != null)      vitales.push(`C.C.: ${c.condicionCorporal}/5`);
     if (vitales.length) campo('Signos vitales', vitales.join('   ·   '));
+    if (c.gananciaPeso != null) {
+      campo('Peso', `Ganancia ${c.gananciaPeso} kg${c.pesoResultante != null ? `  ->  ${c.pesoResultante} kg` : ''}`);
+    }
 
     // Enfermedades (incluye diagnóstico/pronóstico/plan propios de cada condición)
     if (c.enfermedades.length) {
@@ -1184,6 +1196,22 @@ export async function generarHistorialAnimal(res: Response, animalId: string) {
     );
   }
 
+  // ── Vitaminas del animal (historial propio, separado de las desparasitaciones) ──
+  if (vitaminasAnimal.length) {
+    doc.moveDown(0.5);
+    guardarEspacio(doc, 50);
+    seccionPDF(doc, 'Vitaminas');
+    tablaPDF(
+      doc,
+      ['Producto', 'Principio activo', 'Fecha', 'Dosis', 'Vía'],
+      vitaminasAnimal.map((v) => [
+        v.medicamento?.nombre ?? '—', v.medicamento?.principioActivo ?? '—',
+        fmtFecha(v.fecha), v.dosis ?? '—', v.via ?? '—',
+      ]),
+      [130, 130, 70, 70, 76],
+    );
+  }
+
   piePaginaPDF(doc);
   doc.end();
 }
@@ -1207,6 +1235,8 @@ export async function generarConsulta(res: Response, consultaId: string) {
       enfermedades:             true,
       tratamientos:             { include: { medicamento: { select: { nombre: true } } } },
       informacionEpidemiologica: true,
+      desparasitaciones:        { include: { medicamento: { select: { nombre: true, principioActivo: true } } }, orderBy: { fecha: 'asc' } },
+      vitaminas:                { include: { medicamento: { select: { nombre: true, principioActivo: true } } }, orderBy: { fecha: 'asc' } },
     },
   });
 
@@ -1240,7 +1270,7 @@ export async function generarConsulta(res: Response, consultaId: string) {
     ['Finca',            c.animal.lote?.finca?.nombre ?? '—'],
     ['Lote',             c.animal.lote?.nombre  ?? '—'],
     ['Fecha nacimiento', fmtFechaLarga(c.animal.fechaNacimiento)],
-    ['Peso',             c.animal.pesoActual != null ? `${c.animal.pesoActual} kg` : '—'],
+    ['Peso de registro', c.animal.pesoActual != null ? `${c.animal.pesoActual} kg` : '—'],
     ['Estado sanitario', etiquetaEnum(c.animal.estadoSanitario)],
   ];
   fichaA.forEach(([k, v], i) => parKV(doc, k, v, i % 2 === 0));
@@ -1285,6 +1315,7 @@ export async function generarConsulta(res: Response, consultaId: string) {
   if (c.estadoReproductivo)             vitales.push(`Est. reprod.: ${c.estadoReproductivo.replace(/_/g, ' ')}`);
   if (c.litrosLechesDiarios != null)    vitales.push(`Leche/día: ${c.litrosLechesDiarios} L`);
   if (c.gananciaPeso != null)           vitales.push(`Ganancia peso: ${c.gananciaPeso} kg`);
+  if (c.pesoResultante != null)         vitales.push(`Peso resultante: ${c.pesoResultante} kg`);
 
   if (vitales.length) {
     doc.moveDown(0.6);
@@ -1346,9 +1377,37 @@ export async function generarConsulta(res: Response, consultaId: string) {
     );
   }
 
-  // Las desparasitaciones ya no se atan a una consulta puntual (se
-  // identifican solo por el animal), así que no tienen sección aquí — se
-  // consultan desde el historial completo del animal.
+  // ── Desparasitaciones y vitaminas aplicadas en esta consulta (por separado) ──
+  if (c.desparasitaciones.length) {
+    doc.moveDown(0.6);
+    guardarEspacio(doc, 50);
+    doc.fillColor(GRIS_SUAVE).font('Helvetica-Bold').fontSize(8.5)
+       .text('DESPARASITACIONES', ML, doc.y).moveDown(0.3);
+    tablaPDF(
+      doc,
+      ['Producto', 'Principio activo', 'Tipo', 'Fecha', 'Dosis', 'Vía'],
+      c.desparasitaciones.map((d) => [
+        d.medicamento?.nombre ?? '—', d.medicamento?.principioActivo ?? '—',
+        etiquetaEnum(d.tipo), fmtFecha(d.fecha), d.dosis ?? '—', d.via ?? '—',
+      ]),
+      [110, 110, 68, 60, 60, 68],
+    );
+  }
+  if (c.vitaminas.length) {
+    doc.moveDown(0.6);
+    guardarEspacio(doc, 50);
+    doc.fillColor(GRIS_SUAVE).font('Helvetica-Bold').fontSize(8.5)
+       .text('VITAMINAS', ML, doc.y).moveDown(0.3);
+    tablaPDF(
+      doc,
+      ['Producto', 'Principio activo', 'Fecha', 'Dosis', 'Vía'],
+      c.vitaminas.map((v) => [
+        v.medicamento?.nombre ?? '—', v.medicamento?.principioActivo ?? '—',
+        fmtFecha(v.fecha), v.dosis ?? '—', v.via ?? '—',
+      ]),
+      [130, 130, 70, 70, 76],
+    );
+  }
 
   // ── Info epidemiológica ──
   if (c.informacionEpidemiologica) {

@@ -4,6 +4,7 @@ import { useAutenticacion } from './hooks/useAutenticacion';
 import LayoutPrincipal from './componentes/layout/LayoutPrincipal';
 import CargandoPagina from './componentes/ui/CargandoPagina';
 import RutaProtegida from './componentes/layout/RutaProtegida';
+import { RequierePrivilegio } from './componentes/layout/permisos';
 
 // Carga diferida de páginas para mejor rendimiento (code splitting)
 const PaginaLogin         = lazy(() => import('./paginas/autenticacion/PaginaLogin'));
@@ -52,35 +53,35 @@ export default function App() {
           <Route path="/dashboard" element={<PaginaDashboard />} />
 
           {/* Módulo de fincas */}
-          <Route path="/fincas" element={<PaginaFincas />} />
-          <Route path="/lotes" element={<PaginaLotes />} />
+          <Route path="/fincas" element={<RequierePrivilegio privilegios={['fincas.ver']}><PaginaFincas /></RequierePrivilegio>} />
+          <Route path="/lotes" element={<RequierePrivilegio privilegios={['lotes.ver']}><PaginaLotes /></RequierePrivilegio>} />
 
           {/* Módulo de animales */}
-          <Route path="/animales" element={<PaginaAnimales />} />
-          <Route path="/animales/nuevo" element={<PaginaFormAnimal />} />
-          <Route path="/animales/:id" element={<PaginaDetalleAnimal />} />
-          <Route path="/animales/:id/editar" element={<PaginaFormAnimal />} />
+          <Route path="/animales" element={<RequierePrivilegio privilegios={['animales.ver']}><PaginaAnimales /></RequierePrivilegio>} />
+          <Route path="/animales/nuevo" element={<RequierePrivilegio privilegios={['animales.crear']}><PaginaFormAnimal /></RequierePrivilegio>} />
+          <Route path="/animales/:id" element={<RequierePrivilegio privilegios={['animales.ver']}><PaginaDetalleAnimal /></RequierePrivilegio>} />
+          <Route path="/animales/:id/editar" element={<RequierePrivilegio privilegios={['animales.editar']}><PaginaFormAnimal /></RequierePrivilegio>} />
 
           {/* Módulo médico */}
-          <Route path="/historial-medico" element={<PaginaHistorialMedico />} />
-          <Route path="/vacunacion" element={<PaginaVacunacion />} />
+          <Route path="/historial-medico" element={<RequierePrivilegio privilegios={['historial_medico.ver']}><PaginaHistorialMedico /></RequierePrivilegio>} />
+          <Route path="/vacunacion" element={<RequierePrivilegio privilegios={['vacunacion.ver']}><PaginaVacunacion /></RequierePrivilegio>} />
 
           {/* Módulo reproductivo */}
-          <Route path="/reproduccion" element={<PaginaReproduccion />} />
-          <Route path="/inseminacion" element={<PaginaInseminacion />} />
+          <Route path="/reproduccion" element={<RequierePrivilegio privilegios={['reproduccion.ver']}><PaginaReproduccion /></RequierePrivilegio>} />
+          <Route path="/inseminacion" element={<RequierePrivilegio privilegios={['inseminacion.ver']}><PaginaInseminacion /></RequierePrivilegio>} />
 
           {/* Módulo de geolocalización */}
-          <Route path="/mapa" element={<PaginaMapa />} />
+          <Route path="/mapa" element={<RequierePrivilegio privilegios={['geolocalizacion.ver']}><PaginaMapa /></RequierePrivilegio>} />
 
           {/* Motor de alertas */}
-          <Route path="/alertas" element={<PaginaAlertas />} />
+          <Route path="/alertas" element={<RequierePrivilegio privilegios={['alertas.ver']}><PaginaAlertas /></RequierePrivilegio>} />
 
           {/* Reportes */}
-          <Route path="/reportes" element={<PaginaReportes />} />
+          <Route path="/reportes" element={<RequierePrivilegio privilegios={['reportes.generar']}><PaginaReportes /></RequierePrivilegio>} />
 
-          {/* Seguridad (solo administrador) */}
-          <Route path="/seguridad" element={<PaginaSeguridad />} />
-          <Route path="/auditoria" element={<PaginaAuditoria />} />
+          {/* Seguridad (usuarios, roles y privilegios) */}
+          <Route path="/seguridad" element={<RequierePrivilegio privilegios={['usuarios.ver', 'roles.gestionar']}><PaginaSeguridad /></RequierePrivilegio>} />
+          <Route path="/auditoria" element={<RequierePrivilegio privilegios={['auditoria.ver']}><PaginaAuditoria /></RequierePrivilegio>} />
         </Route>
 
         {/* Cualquier ruta no encontrada redirige al dashboard */}

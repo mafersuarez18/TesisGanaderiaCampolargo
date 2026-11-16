@@ -23,6 +23,7 @@ const seleccionUsuario = {
   cargo: true,
   telefono: true,
   bloqueadoHasta: true,
+  ultimoAcceso: true,
   intentosFallidos: true,
 } as const;
 
@@ -43,13 +44,41 @@ export async function listarUsuarios(busqueda?: string, rolId?: string) {
   });
 }
 
+// Ficha completa: datos de la cuenta, rol con sus privilegios y un resumen
+// de su actividad en el sistema.
 export async function obtenerUsuarioPorId(id: string) {
   const usuario = await prisma.usuario.findUnique({
     where: { id },
-    select: seleccionUsuario,
+    select: {
+      ...seleccionUsuario,
+      cedulaIdentidad: true,
+      ultimoAcceso: true,
+      creadoPor: { select: { nombre: true, apellido: true } },
+      rol: {
+        select: {
+          id: true, nombre: true, descripcion: true,
+          privilegios: { select: { privilegio: { select: { id: true, descripcion: true } } } },
+        },
+      },
+      _count: {
+        select: {
+          historialesMedicosCreados: true,
+          eventosReproductivosRegistrados: true,
+          vacunasAplicadas: true,
+          desparasitacionesAplicadas: true,
+          vitaminasAplicadas: true,
+          registrosAuditoria: true,
+        },
+      },
+    },
   });
   if (!usuario) throw new ErrorNoEncontrado(`Usuario con id '${id}' no encontrado`);
-  return usuario;
+  const { rol, ...resto } = usuario;
+  return {
+    ...resto,
+    rol: { id: rol.id, nombre: rol.nombre, descripcion: rol.descripcion },
+    privilegios: rol.privilegios.map((rp) => rp.privilegio.descripcion).sort(),
+  };
 }
 
 export interface DatosCrearUsuario {

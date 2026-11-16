@@ -92,6 +92,25 @@ interface RegistroVacunacion {
   aplicadoPor: { id: string; nombre: string; apellido: string };
 }
 
+// Vitamina aplicada (historial propio): se lista junto a las aplicaciones,
+// en su propia fila, aunque se haya registrado en la misma consulta que
+// una desparasitación.
+interface RegistroVitamina {
+  id: string;
+  fecha: string;
+  dosis?: string | null;
+  via?: string | null;
+  observaciones?: string | null;
+  animal: { id: string; numeroIdentificacion: string; nombre?: string | null };
+  medicamento: { id: string; nombre: string; principioActivo?: string | null };
+  veterinario?: { id: string; nombre: string; apellido: string } | null;
+  historialMedico?: { id: string; fechaConsulta: string; motivoConsulta: string } | null;
+}
+
+type FilaHistorial =
+  | { clase: 'aplicacion'; fecha: string; registro: RegistroVacunacion }
+  | { clase: 'vitamina'; fecha: string; vitamina: RegistroVitamina };
+
 interface CumplimientoLote {
   loteId: string;
   loteNombre: string;
@@ -149,8 +168,10 @@ const fmtFecha = (s?: string) =>
 
 export default function PaginaVacunacion() {
   const queryClient = useQueryClient();
-  const { esAdministrador, esVeterinario } = useAutenticacion();
-  const puedeEditar = esAdministrador || esVeterinario;
+  const { tienePrivilegio } = useAutenticacion();
+  // Registrar/editar aplicaciones y gestionar calendarios son privilegios distintos
+  const puedeEditar = tienePrivilegio('vacunacion.registrar');
+  const puedeGestionarCalendarios = tienePrivilegio('vacunacion.gestionar_calendario');
   // ?animalId=… (al venir desde la ficha de un animal): abre directamente el
   // historial de aplicaciones filtrado por ese animal.
   const [parametrosUrl, setParametrosUrl] = useSearchParams();
@@ -170,6 +191,7 @@ export default function PaginaVacunacion() {
   const [registroSeleccionado, setRegistroSeleccionado] = useState<RegistroVacunacion | null>(null);
   const [registroEditar, setRegistroEditar]             = useState<RegistroVacunacion | null>(null);
   const [registroEliminar, setRegistroEliminar]         = useState<string | null>(null);
+  const [vitaminaSeleccionada, setVitaminaSeleccionada] = useState<RegistroVitamina | null>(null);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data: calendarios, isLoading: cargandoCalendarios } = useQuery<CalendarioVacunacion[]>({
@@ -198,6 +220,20 @@ export default function PaginaVacunacion() {
   });
 
   const registros: RegistroVacunacion[] = respuestaRegistros?.datos ?? [];
+
+  // Vitaminas (solo cuando no se filtra por un calendario de vacunación)
+  const { data: vitaminas = [] } = useQuery<RegistroVitamina[]>({
+    queryKey: ['vitaminas-aplicadas', animalIdFiltro],
+    queryFn: () => clienteHttp
+      .get('/vacunacion/vitaminas', { params: animalIdFiltro ? { animalId: animalIdFiltro } : {} })
+      .then((r) => r.data.datos ?? []),
+    enabled: pestanaActiva === 'registros' && !calendarioActivo,
+    staleTime: 60 * 1000,
+  });
+  const filas: FilaHistorial[] = [
+    ...registros.map((r): FilaHistorial => ({ clase: 'aplicacion', fecha: r.fechaAplicacion, registro: r })),
+    ...(calendarioActivo ? [] : vitaminas.map((v): FilaHistorial => ({ clase: 'vitamina', fecha: v.fecha, vitamina: v }))),
+  ].sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
   // Aplicaciones que ya tienen una posterior del mismo animal y vacuna: su
   // próxima fecha ya no cuenta (se muestran como "Renovada").
   const renovadas = new Set<string>();
@@ -307,7 +343,7 @@ export default function PaginaVacunacion() {
         <div className="flex items-center gap-2">
           {pestanaActiva === 'calendarios' ? (
             <>
-              {puedeEditar && (
+              {puedeGestionarCalendarios && (
                 <button
                   onClick={() => setMostrarFormCalendario(true)}
                   className="boton boton-primario gap-2 text-sm"
@@ -369,7 +405,7 @@ export default function PaginaVacunacion() {
                 </div>
                 <p className="font-medium text-on-surface-variant">Sin calendarios de vacunación</p>
                 <p className="text-xs text-outline mt-1">Cree el primer protocolo</p>
-                {puedeEditar && (
+                {puedeGestionarCalendarios && (
                   <button onClick={() => setMostrarFormCalendario(true)} className="boton boton-primario mt-4 text-sm gap-2">
                     <Icono nombre="add" clase="text-[18px]" />
                     Nuevo calendario
@@ -461,7 +497,7 @@ export default function PaginaVacunacion() {
                   <div key={i} className="h-16 rounded-xl bg-surface-container animate-pulse" />
                 ))}
               </div>
-            ) : !registros.length ? (
+            ) : !filas.length ? (
               <div className="tarjeta-vidrio rounded-2xl p-12 text-center">
                 <Icono nombre="task_alt" clase="text-[40px] text-outline mx-auto mb-3" />
                 <p className="font-medium text-on-surface-variant">Sin registros de vacunación</p>
@@ -474,12 +510,47 @@ export default function PaginaVacunacion() {
               </div>
             ) : (
               <div className="tarjeta-vidrio rounded-2xl overflow-hidden">
-                {registros.map((reg, idx) => (
+                {filas.map((fila, idx) => fila.clase === 'vitamina' ? (
+                  <div
+                    key={`vit-${fila.vitamina.id}`}
+                    onClick={() => setVitaminaSeleccionada(fila.vitamina)}
+                    className={`p-4 hover:bg-surface-container-low transition-colors cursor-pointer
+                      ${idx < filas.length - 1 ? 'border-b border-outline-variant/20' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-xl bg-secondary/10 flex-shrink-0">
+                          <Icono nombre="water_drop" relleno clase="text-[18px] text-secondary" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-on-surface">{fila.vitamina.medicamento.nombre}</span>
+                            <Badge variante="gris" tamano="xs">Vitamina</Badge>
+                            <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                              #{fila.vitamina.animal.numeroIdentificacion}
+                              {fila.vitamina.animal.nombre && ` · ${fila.vitamina.animal.nombre}`}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-3 mt-1 text-xs text-on-surface-variant">
+                            <span>{fmtFecha(fila.vitamina.fecha)}</span>
+                            {fila.vitamina.dosis && <span>Dosis: {fila.vitamina.dosis}</span>}
+                            {fila.vitamina.via && <span>Vía: {fila.vitamina.via}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      {fila.vitamina.veterinario && (
+                        <p className="text-xs text-on-surface-variant text-right flex-shrink-0">
+                          {fila.vitamina.veterinario.nombre} {fila.vitamina.veterinario.apellido}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ) : ((reg: RegistroVacunacion) => (
                   <div
                     key={reg.id}
                     onClick={() => setRegistroSeleccionado(reg)}
                     className={`p-4 hover:bg-surface-container-low transition-colors cursor-pointer
-                      ${idx < registros.length - 1 ? 'border-b border-outline-variant/20' : ''}
+                      ${idx < filas.length - 1 ? 'border-b border-outline-variant/20' : ''}
                       ${registroSeleccionado?.id === reg.id ? 'bg-primary/5' : ''}`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -501,6 +572,7 @@ export default function PaginaVacunacion() {
                           </div>
                           <div className="flex flex-wrap gap-3 mt-1 text-xs text-on-surface-variant">
                             <span>{fmtFecha(reg.fechaAplicacion)}</span>
+                            {reg.medicamento      && <span>Producto: {reg.medicamento.nombre}</span>}
                             {reg.dosis            && <span>Dosis: {reg.dosis}</span>}
                             {reg.viaAdministracion && <span>Vía: {reg.viaAdministracion}</span>}
                             {reg.lote             && <span className="font-mono">Lote: {reg.lote}</span>}
@@ -532,7 +604,7 @@ export default function PaginaVacunacion() {
                       <p className="mt-2 text-xs text-on-surface-variant pl-11 line-clamp-1">{reg.observaciones}</p>
                     )}
                   </div>
-                ))}
+                ))(fila.registro))}
               </div>
             )}
           </motion.div>
@@ -872,7 +944,8 @@ export default function PaginaVacunacion() {
       </AnimatePresence>
 
       {/* FAB — solo en pestañas de edición */}
-      {pestanaActiva !== 'planes' && pestanaActiva !== 'cumplimiento' && (
+      {pestanaActiva !== 'planes' && pestanaActiva !== 'cumplimiento'
+        && (pestanaActiva === 'calendarios' ? puedeGestionarCalendarios : puedeEditar) && (
         <button
           onClick={() => pestanaActiva === 'calendarios' ? setMostrarFormCalendario(true) : setMostrarFormRegistro(true)}
           className="md:hidden fixed bottom-20 right-5 w-14 h-14 bg-primary text-on-primary rounded-full
@@ -1034,7 +1107,7 @@ export default function PaginaVacunacion() {
       {/* Modal: Detalle del calendario */}
       <DetalleCalendario
         calendario={calendarioDetalle}
-        puedeEditar={puedeEditar}
+        puedeEditar={puedeGestionarCalendarios}
         alCerrar={() => setCalendarioDetalle(null)}
         alVerHistorial={(cal) => {
           setCalendarioDetalle(null);
@@ -1092,6 +1165,44 @@ export default function PaginaVacunacion() {
       </AnimatePresence>
 
       {/* Modal: Confirmar eliminación */}
+      <Modal
+        abierto={!!vitaminaSeleccionada}
+        alCerrar={() => setVitaminaSeleccionada(null)}
+        titulo="Vitamina aplicada"
+        descripcion={vitaminaSeleccionada ? fmtFecha(vitaminaSeleccionada.fecha) : undefined}
+      >
+        {vitaminaSeleccionada && (
+          <div className="space-y-4 text-sm">
+            <div className="p-3 rounded-xl bg-primary/5 border border-primary/15">
+              <p className="font-semibold text-on-surface">
+                #{vitaminaSeleccionada.animal.numeroIdentificacion}
+                {vitaminaSeleccionada.animal.nombre && ` · ${vitaminaSeleccionada.animal.nombre}`}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                ['Producto', vitaminaSeleccionada.medicamento.nombre],
+                ['Principio activo', vitaminaSeleccionada.medicamento.principioActivo],
+                ['Dosis', vitaminaSeleccionada.dosis],
+                ['Vía', vitaminaSeleccionada.via],
+                ['Aplicada por', vitaminaSeleccionada.veterinario
+                  ? `${vitaminaSeleccionada.veterinario.nombre} ${vitaminaSeleccionada.veterinario.apellido}` : null],
+                ['Consulta', vitaminaSeleccionada.historialMedico
+                  ? `${fmtFecha(vitaminaSeleccionada.historialMedico.fechaConsulta)} · ${vitaminaSeleccionada.historialMedico.motivoConsulta}` : 'Registrada fuera de una consulta'],
+              ] as const).map(([etiqueta, valor]) => (
+                <div key={etiqueta} className="p-3 rounded-xl bg-surface-container-low">
+                  <p className="text-[11px] text-on-surface-variant">{etiqueta}</p>
+                  <p className="font-medium text-on-surface">{valor || '—'}</p>
+                </div>
+              ))}
+            </div>
+            {vitaminaSeleccionada.observaciones && (
+              <p className="text-on-surface-variant">{vitaminaSeleccionada.observaciones}</p>
+            )}
+          </div>
+        )}
+      </Modal>
+
       <ModalConfirmacion
         abierto={!!registroEliminar}
         titulo="Eliminar registro de vacunación"

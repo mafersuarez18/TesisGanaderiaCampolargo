@@ -5,6 +5,7 @@ import {
   verificarToken,
   requerirPrivilegio,
   autenticado,
+  invalidarPermisosTrasCambios,
 } from '../../compartido/middlewares/autenticacion';
 import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
 import {
@@ -21,7 +22,7 @@ import { respuestaExito } from '../../compartido/utilidades/respuestaHttp';
 
 const enrutador = Router();
 
-enrutador.use(verificarToken);
+enrutador.use(verificarToken, invalidarPermisosTrasCambios);
 
 // Las rutas de auto-servicio ("/mi-perfil", "/cambiar-contrasena") solo
 // exigen sesión iniciada — cualquier usuario puede ver/editar su propio

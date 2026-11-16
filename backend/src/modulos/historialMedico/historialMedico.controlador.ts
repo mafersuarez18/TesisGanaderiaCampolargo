@@ -88,6 +88,7 @@ const esquemaEnfermedad = z.object({
 });
 
 const esquemaHistorial = z.object({
+  consultaOrigenId:            z.string().min(1).optional(),
   animalId:                    z.string().min(1),
   fechaConsulta:               z.coerce.date(),
   motivoConsulta:              z.string().min(2).max(300),
@@ -131,6 +132,11 @@ const esquemaActualizarPrueba = z.object({
   fecha:         z.coerce.date().nullable().optional(),
   resultado:     z.string().max(1000).nullable().optional(),
   observaciones: z.string().max(500).nullable().optional(),
+  // Diagnósticos y tratamientos que indiquen los resultados
+  enfermedades:  z.array(esquemaEnfermedad).optional(),
+  tratamientos:  z.array(esquemaTratamiento.extend({
+    indiceEnfermedadNueva: z.number().int().min(0).optional(),
+  })).optional(),
 });
 
 const esquemaObservacion = z.object({
@@ -263,8 +269,12 @@ export async function controladorPrefillConsulta(
   req: Request, res: Response, next: NextFunction,
 ) {
   try {
-    const { animalId } = z.object({ animalId: z.string().min(1) }).parse(req.query);
-    const prefill = await obtenerPrefillConsulta(animalId);
+    const { animalId, tratamientoId } = z.object({
+      animalId: z.string().min(1).optional(),
+      // Consulta de seguimiento de un tratamiento que no funcionó
+      tratamientoId: z.string().min(1).optional(),
+    }).parse(req.query);
+    const prefill = await obtenerPrefillConsulta(animalId, tratamientoId);
     return respuestaExito(res, prefill);
   } catch (error) { return next(error); }
 }

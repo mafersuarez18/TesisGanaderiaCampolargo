@@ -101,7 +101,9 @@ async function obtenerAnimalesFinca(
 // ── Página principal ─────────────────────────────────────────────────────────
 
 export default function PaginaFincas() {
-  const { esAdministrador } = useAutenticacion();
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeCrear = tienePrivilegio('fincas.crear');
+  const puedeModificar = tienePrivilegio('fincas.editar', 'fincas.eliminar');
   const cliente = useQueryClient();
   const [fincaEliminar, setFincaEliminar] = useState<Finca | null>(null);
   const [fincaEditar,   setFincaEditar]   = useState<Finca | null>(null);
@@ -166,7 +168,7 @@ export default function PaginaFincas() {
         <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
           Todas las fincas
         </p>
-        {esAdministrador && (
+        {puedeCrear && (
           <button
             onClick={() => setModalCrear(true)}
             className="boton boton-primario gap-2 text-sm"
@@ -194,7 +196,7 @@ export default function PaginaFincas() {
                 <Icono nombre="home_work" clase="text-[32px] text-outline" />
               </div>
               <p className="font-medium text-on-surface-variant">Sin fincas registradas</p>
-              {esAdministrador && (
+              {puedeCrear && (
                 <button
                   onClick={() => setModalCrear(true)}
                   className="boton boton-primario mt-4 text-sm gap-2"
@@ -216,7 +218,7 @@ export default function PaginaFincas() {
                   <TarjetaFinca
                     finca={finca}
                     seleccionada={fincaSeleccionada?.id === finca.id}
-                    puedeEditar={esAdministrador}
+                    puedeEditar={puedeModificar}
                     alSeleccionar={() =>
                       setFincaSeleccionada((prev) => (prev?.id === finca.id ? null : finca))
                     }
@@ -245,7 +247,7 @@ export default function PaginaFincas() {
                 onCerrar={() => setFincaSeleccionada(null)}
                 onEditar={() => setFincaEditar(fincaSeleccionada)}
                 onEliminar={() => setFincaEliminar(fincaSeleccionada)}
-                puedeEditar={esAdministrador}
+                puedeEditar={puedeModificar}
               />
             </motion.div>
           )}
@@ -271,7 +273,7 @@ export default function PaginaFincas() {
                 onCerrar={() => setFincaSeleccionada(null)}
                 onEditar={() => { setFincaSeleccionada(null); setFincaEditar(fincaSeleccionada); }}
                 onEliminar={() => { setFincaSeleccionada(null); setFincaEliminar(fincaSeleccionada); }}
-                puedeEditar={esAdministrador}
+                puedeEditar={puedeModificar}
               />
             </motion.div>
           </div>
@@ -339,6 +341,7 @@ function TarjetaFinca({
   alEditar: (e: React.MouseEvent) => void;
   alEliminar: (e: React.MouseEvent) => void;
 }) {
+  const { tienePrivilegio } = useAutenticacion();
   return (
     <div
       onClick={alSeleccionar}
@@ -363,20 +366,24 @@ function TarjetaFinca({
         </div>
         {puedeEditar && (
           <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={alEditar}
-              className="p-1.5 hover:bg-surface-container rounded-lg transition-colors"
-              title="Editar"
-            >
-              <Icono nombre="edit" clase="text-[16px] text-on-surface-variant hover:text-primary" />
-            </button>
-            <button
-              onClick={alEliminar}
-              className="p-1.5 hover:bg-error-container rounded-lg transition-colors"
-              title="Eliminar"
-            >
-              <Icono nombre="delete" clase="text-[16px] text-on-surface-variant hover:text-error" />
-            </button>
+            {tienePrivilegio('fincas.editar') && (
+              <button
+                onClick={alEditar}
+                className="p-1.5 hover:bg-surface-container rounded-lg transition-colors"
+                title="Editar"
+              >
+                <Icono nombre="edit" clase="text-[16px] text-on-surface-variant hover:text-primary" />
+              </button>
+            )}
+            {tienePrivilegio('fincas.eliminar') && (
+              <button
+                onClick={alEliminar}
+                className="p-1.5 hover:bg-error-container rounded-lg transition-colors"
+                title="Eliminar"
+              >
+                <Icono nombre="delete" clase="text-[16px] text-on-surface-variant hover:text-error" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -439,6 +446,7 @@ function PanelDetalleFinca({
   puedeEditar: boolean;
 }) {
   const navegar = useNavigate();
+  const { tienePrivilegio } = useAutenticacion();
   const [busqueda, setBusqueda] = useState('');
   const [filtroLote, setFiltroLote] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('ACTIVO');
@@ -490,20 +498,24 @@ function PanelDetalleFinca({
         <div className="flex items-center gap-1">
           {puedeEditar && (
             <>
-              <button
-                onClick={onEditar}
-                className="p-2 hover:bg-surface-container rounded-xl transition-colors"
-                title="Editar finca"
-              >
-                <Icono nombre="edit" clase="text-[18px] text-on-surface-variant" />
-              </button>
-              <button
-                onClick={onEliminar}
-                className="p-2 hover:bg-error-container rounded-xl transition-colors"
-                title="Eliminar finca"
-              >
-                <Icono nombre="delete" clase="text-[18px] text-on-surface-variant hover:text-error" />
-              </button>
+              {tienePrivilegio('fincas.editar') && (
+                <button
+                  onClick={onEditar}
+                  className="p-2 hover:bg-surface-container rounded-xl transition-colors"
+                  title="Editar finca"
+                >
+                  <Icono nombre="edit" clase="text-[18px] text-on-surface-variant" />
+                </button>
+              )}
+              {tienePrivilegio('fincas.eliminar') && (
+                <button
+                  onClick={onEliminar}
+                  className="p-2 hover:bg-error-container rounded-xl transition-colors"
+                  title="Eliminar finca"
+                >
+                  <Icono nombre="delete" clase="text-[18px] text-on-surface-variant hover:text-error" />
+                </button>
+              )}
             </>
           )}
           <button

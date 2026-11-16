@@ -1,4 +1,7 @@
-﻿import { Router } from 'express';
+﻿import { Router, Request, Response, NextFunction } from 'express';
+import { z } from 'zod';
+import { prisma } from '../../compartido/prisma/clientePrisma';
+import { respuestaExito } from '../../compartido/utilidades/respuestaHttp';
 import {
   verificarToken,
   requerirPrivilegio,
@@ -46,6 +49,25 @@ enrutador.patch('/calendarios/:id', requerirPrivilegio('vacunacion.gestionar_cal
 enrutador.get('/cumplimiento-por-lote', requerirPrivilegio('vacunacion.ver'), controladorCumplimientoPorLote);
 
 // Registros de vacunación aplicada
+// Vitaminas aplicadas (historial propio; se muestran junto a las aplicaciones)
+enrutador.get('/vitaminas', requerirPrivilegio('vacunacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { animalId } = z.object({ animalId: z.string().optional() }).parse(req.query);
+    const vitaminas = await prisma.registroVitaminas.findMany({
+      where: { ...(animalId && { animalId }) },
+      include: {
+        animal: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+        medicamento: { select: { id: true, nombre: true, principioActivo: true } },
+        veterinario: { select: { id: true, nombre: true, apellido: true } },
+        historialMedico: { select: { id: true, fechaConsulta: true, motivoConsulta: true } },
+      },
+      orderBy: { fecha: 'desc' },
+      take: 50,
+    });
+    return respuestaExito(res, vitaminas);
+  } catch (error) { return next(error); }
+});
+
 enrutador.get('/', requerirPrivilegio('vacunacion.ver'), controladorListarRegistros);
 enrutador.post('/', requerirPrivilegio('vacunacion.registrar'), registrarAuditoria('Registrar vacunación', 'RegistroVacunacion'), controladorRegistrarVacunacion);
 enrutador.patch('/:id', requerirPrivilegio('vacunacion.registrar'), registrarAuditoria('Actualizar registro vacunación', 'RegistroVacunacion'), controladorActualizarRegistro);

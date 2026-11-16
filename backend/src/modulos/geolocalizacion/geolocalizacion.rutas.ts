@@ -44,8 +44,10 @@ enrutador.get(
 // dispositivos GPS (autenticado por apiKey, no por sesión de usuario)
 enrutador.post('/dispositivos/:apiKey/ubicacion', controladorRegistrarUbicacion);
 
-// GET /api/geolocalizacion/dispositivos — listar dispositivos
-enrutador.get('/dispositivos', verificarToken, requerirPrivilegio('geolocalizacion.gestionar_dispositivos'), controladorListarDispositivos);
+// GET /api/geolocalizacion/dispositivos — listar dispositivos (consultar
+// basta con poder ver el módulo; registrarlos o importar reportes exige
+// gestionar dispositivos)
+enrutador.get('/dispositivos', verificarToken, requerirPrivilegio('geolocalizacion.ver'), controladorListarDispositivos);
 
 // POST /api/geolocalizacion/dispositivos — registrar un collar y asignarlo
 enrutador.post(

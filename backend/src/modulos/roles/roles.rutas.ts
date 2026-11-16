@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { verificarToken, requerirPrivilegio } from '../../compartido/middlewares/autenticacion';
+import { verificarToken, requerirPrivilegio, invalidarPermisosTrasCambios } from '../../compartido/middlewares/autenticacion';
 import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
 import {
   controladorListarRoles,
@@ -14,7 +14,7 @@ import {
 
 const enrutador = Router();
 
-enrutador.use(verificarToken, requerirPrivilegio('roles.gestionar'));
+enrutador.use(verificarToken, requerirPrivilegio('roles.gestionar'), invalidarPermisosTrasCambios);
 
 // Las rutas de privilegios ("/privilegios/catalogo") van antes que "/:id"
 // para que Express no las confunda con un id de rol.

@@ -14,6 +14,33 @@ export const DIAS_REVISION_SERVICIO = 21;
 // Duración media de la gestación bovina, para estimar la fecha de parto.
 export const DIAS_GESTACION_BOVINA = 283;
 
+// Edad mínima recomendable para el primer servicio (IA o monta) de una
+// novilla: ~15 meses (y idealmente 60-65 % del peso adulto). Antes de eso la
+// hembra puede quedar preñada, pero con menor tasa de concepción y más
+// riesgo de distocia, así que se advierte sin bloquear el registro.
+export const EDAD_MINIMA_REPRODUCTIVA_DIAS = 450;
+
+export async function evaluarEdadReproductiva(animalId: string, fecha: Date = new Date()) {
+  const animal = await prisma.animal.findUnique({
+    where: { id: animalId },
+    select: { sexo: true, fechaNacimiento: true },
+  });
+  if (!animal) throw new ErrorNoEncontrado(`Animal con id '${animalId}' no encontrado`);
+  const edadDias = animal.fechaNacimiento
+    ? Math.floor((fecha.getTime() - animal.fechaNacimiento.getTime()) / MS_DIA)
+    : null;
+  const cumple = edadDias == null ? null : edadDias >= EDAD_MINIMA_REPRODUCTIVA_DIAS;
+  return {
+    edadDias,
+    edadMinimaDias: EDAD_MINIMA_REPRODUCTIVA_DIAS,
+    cumple,
+    advertencia: cumple === false
+      ? `Esta vaca no cumple con la edad mínima recomendable de ${EDAD_MINIMA_REPRODUCTIVA_DIAS} días (15 meses) `
+        + `para someterse a procesos reproductivos (tiene ${edadDias} días), por lo cual las probabilidades de éxito son menores.`
+      : null,
+  };
+}
+
 const MS_DIA = 24 * 60 * 60 * 1000;
 const TIPOS_SERVICIO: TipoEventoReproductivo[] = [
   TipoEventoReproductivo.INSEMINACION_ARTIFICIAL,

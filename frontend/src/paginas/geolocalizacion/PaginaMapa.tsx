@@ -9,6 +9,7 @@ import { clienteHttp } from '../../servicios/clienteAxios';
 import Badge from '../../componentes/ui/Badge';
 import Icono from '../../componentes/ui/Icono';
 import BuscadorAnimal from '../../componentes/ui/BuscadorAnimal';
+import { useAutenticacion } from '../../hooks/useAutenticacion';
 
 // ── Fix icono default de Leaflet en Vite ─────────────────────────────────────
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -231,6 +232,8 @@ const CENTRO_YARACUY: [number, number] = [10.23, -68.48];
 
 // ── Componente principal ──────────────────────────────────────────────────────
 export default function PaginaMapa() {
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeGestionar = tienePrivilegio('geolocalizacion.gestionar_dispositivos');
   const [pestaña,      setPestaña]      = useState<'dispositivos' | 'mapa' | 'finca' | 'movilidad'>('dispositivos');
   const [modalConfig,  setModalConfig]  = useState(false);
   const [dispositivoAmp, setDispositivoAmp] = useState<string | null>(null);
@@ -414,10 +417,12 @@ export default function PaginaMapa() {
             Seguimiento GPS de animales — Yaracuy, Venezuela
           </p>
         </div>
-        <button onClick={() => setModalConfig(true)} className="boton boton-primario gap-2 text-sm">
-          <Icono nombre="add_circle" clase="text-[18px]" />
-          Agregar dispositivo
-        </button>
+        {puedeGestionar && (
+          <button onClick={() => setModalConfig(true)} className="boton boton-primario gap-2 text-sm">
+            <Icono nombre="add_circle" clase="text-[18px]" />
+            Agregar dispositivo
+          </button>
+        )}
       </motion.div>
 
       {/* Banner: estado real de los datos */}
@@ -577,7 +582,7 @@ export default function PaginaMapa() {
                         )}
                       </div>
 
-                      <button
+                      {puedeGestionar && <button
                         onClick={(e) => { e.stopPropagation(); abrirSelectorArchivo(disp.id); }}
                         disabled={mutacionImportar.isPending && dispositivoParaImportar === disp.id}
                         title="Cargar el reporte CSV/Excel descargado de la plataforma del collar"
@@ -591,7 +596,7 @@ export default function PaginaMapa() {
                         <span className="hidden sm:inline">
                           {mutacionImportar.isPending && dispositivoParaImportar === disp.id ? 'Importando…' : 'Importar reporte'}
                         </span>
-                      </button>
+                      </button>}
 
                       <Icono nombre={ampliado ? 'expand_less' : 'chevron_right'} clase="text-[18px] text-outline flex-shrink-0" />
                     </div>

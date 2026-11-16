@@ -434,6 +434,8 @@ model HistorialMedico {
   estadoReproductivo                 EstadoReproductivo?
   litrosLechesDiarios                Float?   @map("litros_lechediario")
   gananciaPeso                       Float?   @map("gananciapeso")
+  // Peso resultante: último pesaje (o peso de registro) + ganancia
+  pesoResultante                     Float?   @map("peso_resultante")
 
   // Diagnóstico y plan (a nivel de consulta general; el detalle por condición
   // diagnosticada vive en EnfermedadDiagnosticada, según el modelo lógico)
@@ -454,9 +456,19 @@ model HistorialMedico {
   tratamientos              Tratamiento[]
   informacionEpidemiologica InformacionEpidemiologica?
   pruebasComplementarias    PruebaComplementaria[]
+  // Desparasitaciones y vitaminas aplicadas en esta consulta
+  desparasitaciones         ProgramaDesparasitacion[]
+  vitaminas                 RegistroVitaminas[]
+
+  // Consulta de seguimiento: la consulta anterior cuyo tratamiento no
+  // funcionó (la consulta original queda cerrada; lo nuevo va aquí)
+  consultaOrigenId String?           @map("consulta_origen_id")
+  consultaOrigen   HistorialMedico?  @relation("SeguimientoConsulta", fields: [consultaOrigenId], references: [id], onDelete: SetNull)
+  seguimientos     HistorialMedico[] @relation("SeguimientoConsulta")
 
   @@index([animalId])
   @@index([veterinarioId])
+  @@index([consultaOrigenId])
   @@index([fechaConsulta])
   @@map("registro_medico")
 }
@@ -585,8 +597,13 @@ model ProgramaDesparasitacion {
   veterinarioId String? @map("veterinario_id")
   veterinario   Usuario? @relation("DesparasitacionesAplicadas", fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  // Consulta en la que se registró (si se registró desde una consulta)
+  historialMedicoId String?          @map("registro_medico_id")
+  historialMedico   HistorialMedico? @relation(fields: [historialMedicoId], references: [id], onDelete: SetNull)
+
   @@index([animalId])
   @@index([medicamentoId])
+  @@index([historialMedicoId])
   @@map("programa_desparasitacion")
 }
 
@@ -609,8 +626,13 @@ model RegistroVitaminas {
   veterinarioId String? @map("veterinario_id")
   veterinario   Usuario? @relation("VitaminasAplicadas", fields: [veterinarioId], references: [id], onDelete: SetNull)
 
+  // Consulta en la que se registró (si se registró desde una consulta)
+  historialMedicoId String?          @map("registro_medico_id")
+  historialMedico   HistorialMedico? @relation(fields: [historialMedicoId], references: [id], onDelete: SetNull)
+
   @@index([animalId])
   @@index([medicamentoId])
+  @@index([historialMedicoId])
   @@map("registro_vitaminas")
 }
 

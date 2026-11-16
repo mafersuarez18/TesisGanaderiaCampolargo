@@ -1,16 +1,16 @@
 import { NavLink } from 'react-router-dom';
 import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Icono from '../ui/Icono';
+import { PRIVILEGIOS_MODULO } from './permisos';
 
 // Menú de navegación principal (escritorio y versión deslizable en móvil).
-// Algunos ítems se ocultan según el rol del usuario — la lista completa
-// existe siempre, el filtro ocurre al renderizar.
+// Cada ítem se muestra solo si el usuario tiene el privilegio de ver ese
+// módulo (PRIVILEGIOS_MODULO) — la lista completa existe siempre, el filtro
+// ocurre al renderizar con los privilegios vigentes de la sesión.
 interface ElementoNav {
   etiqueta: string;
   ruta: string;
   icono: string;
-  soloAdmin?: boolean;
-  soloVetOAdmin?: boolean;
 }
 
 const elementosNav: ElementoNav[] = [
@@ -18,15 +18,15 @@ const elementosNav: ElementoNav[] = [
   { etiqueta: 'Fincas',          ruta: '/fincas',          icono: 'home_work' },
   { etiqueta: 'Lotes',           ruta: '/lotes',           icono: 'grid_view' },
   { etiqueta: 'Animales',        ruta: '/animales',        icono: 'pets' },
-  { etiqueta: 'Historial Médico',ruta: '/historial-medico',icono: 'medical_services', soloVetOAdmin: true },
-  { etiqueta: 'Vacunación y Desparasitación', ruta: '/vacunacion', icono: 'vaccines', soloVetOAdmin: true },
-  { etiqueta: 'Inseminación',    ruta: '/inseminacion',    icono: 'science',           soloVetOAdmin: true },
-  { etiqueta: 'Reproducción',    ruta: '/reproduccion',    icono: 'vaca_prenada',    soloVetOAdmin: true },
+  { etiqueta: 'Historial Médico',ruta: '/historial-medico',icono: 'medical_services' },
+  { etiqueta: 'Vacunación y Desparasitación', ruta: '/vacunacion', icono: 'vaccines' },
+  { etiqueta: 'Inseminación',    ruta: '/inseminacion',    icono: 'science' },
+  { etiqueta: 'Reproducción',    ruta: '/reproduccion',    icono: 'vaca_prenada' },
   { etiqueta: 'Geolocalización', ruta: '/mapa',            icono: 'map' },
   { etiqueta: 'Alertas',         ruta: '/alertas',         icono: 'notifications_active' },
-  { etiqueta: 'Reportes',        ruta: '/reportes',        icono: 'analytics',         soloVetOAdmin: true },
-  { etiqueta: 'Seguridad',       ruta: '/seguridad',       icono: 'security',          soloAdmin: true },
-  { etiqueta: 'Auditoría',       ruta: '/auditoria',       icono: 'fact_check',        soloAdmin: true },
+  { etiqueta: 'Reportes',        ruta: '/reportes',        icono: 'analytics' },
+  { etiqueta: 'Seguridad',       ruta: '/seguridad',       icono: 'security' },
+  { etiqueta: 'Auditoría',       ruta: '/auditoria',       icono: 'fact_check' },
 ];
 
 interface PropiedadesBarraLateral {
@@ -35,12 +35,11 @@ interface PropiedadesBarraLateral {
 }
 
 export default function BarraLateral({ alCerrar, esMobil = false }: PropiedadesBarraLateral) {
-  const { esAdministrador, esVeterinario, usuario } = useAutenticacion();
+  const { usuario, tienePrivilegio } = useAutenticacion();
 
   const elementosVisibles = elementosNav.filter((el) => {
-    if (el.soloAdmin && !esAdministrador) return false;
-    if (el.soloVetOAdmin && !esAdministrador && !esVeterinario) return false;
-    return true;
+    const requeridos = PRIVILEGIOS_MODULO[el.ruta];
+    return !requeridos || tienePrivilegio(...requeridos);
   });
 
   const iniciales = `${usuario?.nombre?.charAt(0) ?? ''}${usuario?.apellido?.charAt(0) ?? ''}`;

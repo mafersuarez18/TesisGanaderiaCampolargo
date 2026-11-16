@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { clienteHttp } from '../../servicios/clienteAxios';
+import { useAutenticacion } from '../../hooks/useAutenticacion';
 import Badge from '../ui/Badge';
 import Icono from '../ui/Icono';
 import ModalConfirmarServicio, { type ServicioAConfirmar } from './ModalConfirmarServicio';
@@ -39,6 +40,8 @@ export function useServiciosPorConfirmar(tipo?: ServicioPorConfirmar['tipo']) {
 const nombreAnimal = (numero: string, nombre?: string | null) => `#${numero}${nombre ? ` · ${nombre}` : ''}`;
 
 export default function ListaServiciosPorConfirmar({ tipo }: { tipo: ServicioPorConfirmar['tipo'] }) {
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeConfirmar = tienePrivilegio('reproduccion.crear', 'inseminacion.crear');
   const navegar = useNavigate();
   const { data: servicios = [], isLoading } = useServiciosPorConfirmar(tipo);
   const [aConfirmar, setAConfirmar] = useState<ServicioAConfirmar | null>(null);
@@ -108,14 +111,18 @@ export default function ListaServiciosPorConfirmar({ tipo }: { tipo: ServicioPor
                     Revisar el {new Date(s.fechaRevision).toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}
                   </Badge>
                 )}
-                <button type="button" onClick={() => abrirConfirmacion(s, true)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
-                  Preñada
-                </button>
-                <button type="button" onClick={() => abrirConfirmacion(s, false)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-error-container text-on-error-container hover:opacity-80 transition-colors">
-                  Vacía
-                </button>
+                {puedeConfirmar && (
+                  <>
+                    <button type="button" onClick={() => abrirConfirmacion(s, true)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                      Preñada
+                    </button>
+                    <button type="button" onClick={() => abrirConfirmacion(s, false)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-error-container text-on-error-container hover:opacity-80 transition-colors">
+                      Vacía
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -127,7 +134,7 @@ export default function ListaServiciosPorConfirmar({ tipo }: { tipo: ServicioPor
         eventoId={detalle?.id ?? null}
         alCerrar={() => setDetalle(null)}
         alVerAnimal={(animalId) => navegar(`/animales/${animalId}`)}
-        alConfirmar={(prenada) => {
+        alConfirmar={!puedeConfirmar ? undefined : (prenada) => {
           if (!detalle) return;
           setDetalle(null);
           abrirConfirmacion(detalle, prenada);

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clienteHttp } from '../../servicios/clienteAxios';
@@ -109,8 +110,9 @@ const ETIQUETA_TIPO_ALERTA: Record<string, string> = {
 // ── Componente principal ──────────────────────────────────────────────────────
 
 export default function PaginaAlertas() {
-  const { esAdministrador, esVeterinario } = useAutenticacion();
-  const puedeAdministrar = esAdministrador || esVeterinario;
+  const { tienePrivilegio } = useAutenticacion();
+  const puedeAdministrar = tienePrivilegio('alertas.evaluar');
+  const puedeGestionarReglas = tienePrivilegio('alertas.gestionar_reglas');
   const queryClient = useQueryClient();
   const [pestaña, setPestaña]             = useState<'notificaciones' | 'reglas'>('notificaciones');
   const [soloNoLeidas, setSoloNoLeidas]   = useState(false);
@@ -180,10 +182,15 @@ export default function PaginaAlertas() {
     onError: () => toast.error('Error al atender la alerta'),
   });
 
+  const navegar = useNavigate();
+  // Tratamiento recién cerrado sin mejoría: se ofrece la consulta de seguimiento
+  const [sinMejoria, setSinMejoria] = useState<string | null>(null);
+
   const mutFinalizarTratamiento = useMutation({
     mutationFn: ({ tratamientoId, mejoro }: { tratamientoId: string; mejoro: boolean }) =>
       clienteHttp.patch(`/historial-medico/tratamientos/${tratamientoId}/finalizar`, { mejoro }),
-    onSuccess: (_datos, { mejoro }) => {
+    onSuccess: (_datos, { mejoro, tratamientoId }) => {
+      if (!mejoro && tienePrivilegio('historial_medico.crear')) setSinMejoria(tratamientoId);
       queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
       queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
       queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
@@ -679,7 +686,7 @@ export default function PaginaAlertas() {
             <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
               {reglas.length} regla(s) configurada(s)
             </p>
-            {esAdministrador && (
+            {puedeGestionarReglas && (
               <button
                 onClick={() => setModalRegla('nueva')}
                 className="boton boton-primario gap-2 text-sm"
@@ -719,7 +726,7 @@ export default function PaginaAlertas() {
                 <TarjetaRegla
                   key={regla.id}
                   regla={regla}
-                  puedeEditar={esAdministrador}
+                  puedeEditar={puedeGestionarReglas}
                   alToggle={() => mutToggleRegla.mutate({ id: regla.id, estado: regla.estado === 'ACTIVA' ? 'PAUSADA' : 'ACTIVA' })}
                   alEditar={() => setModalRegla(regla)}
                   alEliminar={() => setReglaEliminar(regla)}
@@ -745,6 +752,18 @@ export default function PaginaAlertas() {
       </AnimatePresence>
 
       {/* ── Modal: confirmar eliminar regla ──────────────────────────────────── */}
+      {/* No mejoró: la consulta original no se reabre; lo nuevo va en un seguimiento */}
+      <ModalConfirmacion
+        abierto={!!sinMejoria}
+        titulo="¿Registrar consulta de seguimiento?"
+        descripcion="El tratamiento quedó cerrado sin mejoría y la enfermedad sigue activa. Puede registrar ahora una consulta de seguimiento con la evaluación de hoy y un nuevo tratamiento (también podrá hacerlo después desde el historial médico)."
+        textoCancelar="Más tarde"
+        textoConfirmar="Registrar seguimiento"
+        variante="info"
+        alConfirmar={() => { const id = sinMejoria; setSinMejoria(null); navegar(`/historial-medico?seguimiento=${id}`); }}
+        alCerrar={() => setSinMejoria(null)}
+      />
+
       <ModalConfirmacion
         abierto={!!reglaEliminar}
         alCerrar={() => setReglaEliminar(null)}

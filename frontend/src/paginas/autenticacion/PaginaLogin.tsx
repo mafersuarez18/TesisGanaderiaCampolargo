@@ -128,7 +128,7 @@ export default function PaginaLogin() {
               <img src="/logo-ganaderia-campolargo.png" alt="Logo Ganadería Campolargo" className="w-full h-full object-contain p-0.5" />
             </div>
             <div>
-              <p className="font-bold text-on-surface text-base leading-tight">LinajeApp</p>
+              <p className="font-bold text-on-surface text-base leading-tight">Sistema Campolargo</p>
               <p className="text-on-surface-variant text-xs">— Gestión Inteligente del Ganado —</p>
             </div>
           </div>
