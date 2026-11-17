@@ -172,6 +172,50 @@ enrutador.get('/inventario', requerirPrivilegio('inseminacion.ver'), async (req:
   } catch (error) { return next(error); }
 });
 
+// GET /api/inseminacion/inventario/:id — detalle de un lote: datos del
+// análisis seminal, su semental y las inseminaciones hechas con él
+enrutador.get('/inventario/:id', requerirPrivilegio('inseminacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params['id'] as string;
+    const lote = await prisma.inventarioSemen.findUnique({
+      where: { id },
+      include: {
+        semental: {
+          select: { id: true, nombre: true, registro: true, origen: true, raza: { select: { nombre: true } } },
+        },
+        inseminaciones: {
+          select: {
+            fechaInseminacion: true,
+            numeroIntento: true,
+            eventoReproductivo: {
+              select: {
+                id: true,
+                animal: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+                gestacion: { select: { estadoGestacion: true } },
+              },
+            },
+          },
+          orderBy: { fechaInseminacion: 'desc' },
+        },
+      },
+    });
+    if (!lote) throw new ErrorNoEncontrado('Lote de semen');
+
+    const { inseminaciones, ...datos } = lote;
+    return respuestaExito(res, {
+      ...datos,
+      inseminacionesConGestacion: inseminaciones.filter((i) => i.eventoReproductivo.gestacion).length,
+      inseminaciones: inseminaciones.map((i) => ({
+        eventoId: i.eventoReproductivo.id,
+        fecha: i.fechaInseminacion,
+        numeroIntento: i.numeroIntento,
+        animal: i.eventoReproductivo.animal,
+        estadoGestacion: i.eventoReproductivo.gestacion?.estadoGestacion ?? null,
+      })),
+    });
+  } catch (error) { return next(error); }
+});
+
 // POST /api/inseminacion/inventario — registrar lote de semen
 enrutador.post('/inventario', requerirPrivilegio('inseminacion.crear'), registrarAuditoria('Registrar lote de semen', 'InventarioSemen'), async (req: Request, res: Response, next: NextFunction) => {
   try {

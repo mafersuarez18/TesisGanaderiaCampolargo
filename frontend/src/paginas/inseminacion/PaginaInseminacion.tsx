@@ -67,6 +67,19 @@ interface LoteSemen {
   semental: { nombre: string };
 }
 
+interface LoteSemenDetalle extends Omit<LoteSemen, 'semental'> {
+  fechaColeccion: string | null;
+  volumen: number | null;
+  coloracion: string | null;
+  observaciones: string | null;
+  semental: { id: string; nombre: string; registro: string | null; origen: string | null; raza: { nombre: string } };
+  inseminacionesConGestacion: number;
+  inseminaciones: {
+    eventoId: string; fecha: string; numeroIntento: number; estadoGestacion: string | null;
+    animal: { id: string; numeroIdentificacion: string; nombre: string | null };
+  }[];
+}
+
 interface Inseminacion {
   id: string;
   fecha: string;
@@ -143,6 +156,7 @@ export default function PaginaInseminacion() {
   const [sementalEditar,   setSementalEditar]   = useState<Semental | null>(null);
   const [sementalEliminar, setSementalEliminar] = useState<Semental | null>(null);
   const [sementalDetalle,  setSementalDetalle]  = useState<string | null>(null);
+  const [loteDetalle,      setLoteDetalle]      = useState<string | null>(null);
   // Inseminación abierta desde el detalle de un semental (puede no estar en la página actual)
   const [eventoSuelto,     setEventoSuelto]     = useState<string | null>(null);
   // Hembra con un servicio sin confirmar o preñada: se pregunta qué pasó
@@ -452,7 +466,12 @@ export default function PaginaInseminacion() {
                 return (
                   <div
                     key={lote.id}
-                    className={`grid grid-cols-[1fr_90px_90px_100px_90px] gap-3 items-center px-5 py-4 text-sm
+                    role="button"
+                    tabIndex={0}
+                    title="Ver detalle del lote"
+                    onClick={() => setLoteDetalle(lote.id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setLoteDetalle(lote.id); } }}
+                    className={`grid grid-cols-[1fr_90px_90px_100px_90px] gap-3 items-center px-5 py-4 text-sm cursor-pointer
                       hover:bg-surface-container-low transition-colors
                       ${idx < lotes.length - 1 ? 'border-b border-outline-variant/10' : ''}
                       ${vencido ? 'bg-error-container/10' : ''}`}
@@ -512,6 +531,17 @@ export default function PaginaInseminacion() {
                 );
               })}
               </div>
+              </div>
+
+              <div className="flex gap-2 px-5 py-3 border-t border-outline-variant/20 bg-surface-container-low/60 text-xs text-on-surface-variant">
+                <Icono nombre="info" clase="text-[16px] text-outline shrink-0 mt-px" />
+                <p>
+                  <span className="font-semibold text-on-surface">Motilidad:</span> porcentaje de espermatozoides
+                  del lote que se mueven activamente al descongelar la pajuela. No la calcula el sistema: es el
+                  valor que informa el laboratorio o el centro de inseminación en el análisis del lote, y se
+                  registra al cargarlo. Mientras más alta, mayor probabilidad de preñez; como referencia, se
+                  considera aceptable a partir de un 30&nbsp;% después de descongelar.
+                </p>
               </div>
 
               {dataInv?.meta?.totalPaginas > 1 && (
@@ -707,6 +737,12 @@ export default function PaginaInseminacion() {
         sementalId={sementalDetalle}
         alCerrar={() => setSementalDetalle(null)}
         alVerInseminacion={(eventoId) => { setSementalDetalle(null); setEventoSuelto(eventoId); }}
+      />
+      <ModalDetalleLote
+        loteId={loteDetalle}
+        alCerrar={() => setLoteDetalle(null)}
+        alVerSemental={(id) => { setLoteDetalle(null); setSementalDetalle(id); }}
+        alVerInseminacion={(eventoId) => { setLoteDetalle(null); setEventoSuelto(eventoId); }}
       />
       <ModalEliminarSemental
         semental={sementalEliminar}
@@ -1430,6 +1466,113 @@ function ModalDetalleSemental({ sementalId, alCerrar, alVerInseminacion }: {
                 ))}
               </div>
             ) : <p className="text-sm text-on-surface-variant italic">Aún no se ha usado su semen.</p>}
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ── Modal: detalle del lote de semen ──────────────────────────────────────────
+
+function ModalDetalleLote({ loteId, alCerrar, alVerSemental, alVerInseminacion }: {
+  loteId: string | null;
+  alCerrar: () => void;
+  alVerSemental: (sementalId: string) => void;
+  alVerInseminacion: (eventoId: string) => void;
+}) {
+  const { data: l, isLoading } = useQuery<LoteSemenDetalle>({
+    queryKey: ['loteSemen', loteId],
+    queryFn: () => clienteHttp.get(`/inseminacion/inventario/${loteId}`).then((r) => r.data.datos),
+    enabled: !!loteId,
+  });
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+  const num = (v: number | null, unidad: string) => (v != null ? `${v.toLocaleString('es-VE')} ${unidad}` : '—');
+
+  const disponibles = l ? Math.max(0, l.cantidadDosis - l.cantidadUsada) : 0;
+  const vence = l?.fechaVencimiento ? new Date(l.fechaVencimiento) : null;
+  const vencido = vence ? vence < new Date() : false;
+  const efectividad = l && l.inseminaciones.length
+    ? Math.round((l.inseminacionesConGestacion / l.inseminaciones.length) * 100) : null;
+
+  return (
+    <Modal abierto={!!loteId} alCerrar={alCerrar} titulo={l ? `Lote ${l.codigoDosis}` : 'Lote de semen'}
+      descripcion={l ? `${l.semental.nombre} · ${l.semental.raza.nombre}` : undefined} tamano="xl">
+      {isLoading || !l ? (
+        <div className="space-y-3">{[0, 1, 2].map((i) => <div key={i} className="h-16 rounded-xl bg-surface-container animate-pulse" />)}</div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {vencido ? <Badge variante="rojo" tamano="xs">Vencido</Badge>
+              : disponibles === 0 ? <Badge variante="rojo" tamano="xs">Agotado</Badge>
+              : disponibles < 5 ? <Badge variante="amarillo" tamano="xs">Stock bajo</Badge>
+              : <Badge variante="verde" tamano="xs" punto>Disponible</Badge>}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { et: 'Dosis disponibles', val: `${disponibles} de ${l.cantidadDosis}` },
+              { et: 'Dosis usadas', val: l.cantidadUsada },
+              { et: 'Inseminaciones', val: l.inseminaciones.length },
+              { et: 'Preñeces logradas', val: efectividad != null ? `${l.inseminacionesConGestacion} (${efectividad}%)` : '—' },
+            ].map((k) => (
+              <div key={k.et} className="rounded-xl bg-surface-container p-3">
+                <p className="text-lg font-bold text-on-surface">{k.val}</p>
+                <p className="text-[11px] text-on-surface-variant">{k.et}</p>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-2">Análisis seminal del lote</p>
+            <div className="rounded-xl border border-outline-variant/30 p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+              <p><span className="text-xs text-on-surface-variant">Motilidad: </span>{l.motivilidad != null ? `${l.motivilidad}%` : '—'}</p>
+              <p><span className="text-xs text-on-surface-variant">Concentración: </span>{num(l.concentracion, 'millones/ml')}</p>
+              <p><span className="text-xs text-on-surface-variant">Volumen: </span>{num(l.volumen, 'ml')}</p>
+              <p><span className="text-xs text-on-surface-variant">Coloración: </span>{l.coloracion ?? '—'}</p>
+              <p><span className="text-xs text-on-surface-variant">Temperatura de almacenamiento: </span>{num(l.temperatura, '°C')}</p>
+              <p><span className="text-xs text-on-surface-variant">Fecha de colecta: </span>{fmt(l.fechaColeccion)}</p>
+              <p>
+                <span className="text-xs text-on-surface-variant">Vence: </span>
+                <span className={vencido ? 'text-error font-semibold' : ''}>{fmt(l.fechaVencimiento)}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-outline-variant/30 p-3 text-sm space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <p>
+                <span className="text-xs text-on-surface-variant">Semental: </span>
+                <span className="font-medium">{l.semental.nombre}</span>
+                {l.semental.registro && <span className="text-on-surface-variant"> · Registro {l.semental.registro}</span>}
+              </p>
+              <button type="button" onClick={() => alVerSemental(l.semental.id)}
+                className="text-xs font-semibold text-primary hover:underline shrink-0">Ver semental</button>
+            </div>
+            <p><span className="text-xs text-on-surface-variant">Origen / procedencia: </span>{l.semental.origen ?? '—'}</p>
+            <p><span className="text-xs text-on-surface-variant">Observaciones del lote: </span>{l.observaciones ?? '—'}</p>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-2">Inseminaciones con este lote</p>
+            {l.inseminaciones.length ? (
+              <div className="rounded-xl border border-outline-variant/30 divide-y divide-outline-variant/15 text-sm max-h-64 overflow-y-auto">
+                {l.inseminaciones.map((i) => (
+                  <button key={i.eventoId} type="button" onClick={() => alVerInseminacion(i.eventoId)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-surface-container-low">
+                    <span>
+                      <span className="text-on-surface font-medium">#{i.animal.numeroIdentificacion}</span>
+                      {i.animal.nombre && <span className="text-on-surface-variant"> · {i.animal.nombre}</span>}
+                      <span className="text-xs text-on-surface-variant"> · {fmt(i.fecha)} · intento {i.numeroIntento}</span>
+                    </span>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                      i.estadoGestacion ? ESTADO_GESTACION_SEM[i.estadoGestacion]?.clase : 'bg-surface-container text-on-surface-variant'}`}>
+                      {i.estadoGestacion ? ESTADO_GESTACION_SEM[i.estadoGestacion]?.et ?? i.estadoGestacion : 'Sin preñez'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : <p className="text-sm text-on-surface-variant italic">Aún no se ha usado este lote.</p>}
           </div>
         </div>
       )}
