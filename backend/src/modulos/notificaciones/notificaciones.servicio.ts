@@ -63,12 +63,21 @@ export async function contarNoLeidas(usuarioId: string): Promise<number> {
   });
 }
 
+// Si la notificación ya no existe (se borró la regla que la generó, o la
+// eliminó otro destinatario) la acción no tiene nada que hacer: se responde
+// con éxito para que la pantalla simplemente la quite. Si existe pero es de
+// otro usuario, sí es un error.
+async function asegurarQueNoExiste(id: string): Promise<void> {
+  const existe = await prisma.notificacion.findUnique({ where: { id }, select: { id: true } });
+  if (existe) throw new ErrorNoEncontrado('Notificación no encontrada');
+}
+
 export async function marcarLeida(id: string, usuarioId: string) {
   const notificacion = await prisma.notificacion.findFirst({
     where: { id, ...perteneceAUsuario(usuarioId) },
     select: { id: true },
   });
-  if (!notificacion) throw new ErrorNoEncontrado('Notificación no encontrada');
+  if (!notificacion) { await asegurarQueNoExiste(id); return { id, yaNoExiste: true }; }
 
   return prisma.notificacion.update({
     where: { id },
@@ -89,7 +98,7 @@ export async function eliminarNotificacion(id: string, usuarioId: string) {
     where: { id, ...perteneceAUsuario(usuarioId) },
     select: { id: true },
   });
-  if (!notificacion) throw new ErrorNoEncontrado('Notificación no encontrada');
+  if (!notificacion) { await asegurarQueNoExiste(id); return { id, yaNoExiste: true }; }
   return prisma.notificacion.delete({ where: { id } });
 }
 
@@ -110,7 +119,7 @@ export async function abordarNotificacion(id: string, usuarioId: string) {
     where: { id, ...perteneceAUsuario(usuarioId) },
     select: { id: true, entidadTipo: true, entidadId: true, titulo: true },
   });
-  if (!notificacion) throw new ErrorNoEncontrado('Notificación no encontrada');
+  if (!notificacion) { await asegurarQueNoExiste(id); return { id, atendidas: 0, yaNoExiste: true }; }
   const resultado = await prisma.notificacion.updateMany({
     where: { ...mismaAlerta(notificacion), estado: { not: 'DESCARTADA' } },
     data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date(), atendidaPorId: usuarioId },

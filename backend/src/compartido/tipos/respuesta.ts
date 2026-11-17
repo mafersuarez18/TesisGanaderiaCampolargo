@@ -47,7 +47,8 @@ export class ErrorAplicacion extends Error {
 
 export class ErrorNoEncontrado extends ErrorAplicacion {
   constructor(recurso: string) {
-    super(`${recurso} no encontrado`, 404);
+    // Acepta el recurso ("Animal") o la frase completa ("Animal no encontrado")
+    super(/no encontrad[oa]/i.test(recurso) ? recurso : `${recurso} no encontrado`, 404);
   }
 }
 

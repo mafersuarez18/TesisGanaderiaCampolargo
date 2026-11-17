@@ -173,10 +173,11 @@ export default function PaginaAlertas() {
 
   const mutAbordar = useMutation({
     mutationFn: (id: string) => clienteHttp.patch(`/notificaciones/${id}/abordar`),
-    onSuccess: () => {
+    onSuccess: (r) => {
       queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
       queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
       queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
+      if (r.data?.datos?.yaNoExiste) { toast('Esa alerta ya no existía: se quitó de la lista'); return; }
       toast.success('Alerta atendida: se cerró para todos sus destinatarios');
     },
     onError: () => toast.error('Error al atender la alerta'),
@@ -227,6 +228,7 @@ export default function PaginaAlertas() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
       queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
+      queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
     },
   });
 
@@ -241,7 +243,13 @@ export default function PaginaAlertas() {
     mutationFn: (id: string) => clienteHttp.delete(`/alertas/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alertas-reglas'] });
-      toast.success('Regla eliminada');
+      // Con la regla se borran las alertas que generó
+      queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
+      queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
+      queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
+      queryClient.invalidateQueries({ queryKey: ['notificaciones-recientes'] });
+      queryClient.invalidateQueries({ queryKey: ['alertas-recientes-dashboard'] });
+      toast.success('Regla eliminada junto con sus alertas');
       setReglaEliminar(null);
     },
     onError: () => toast.error('Error al eliminar la regla'),

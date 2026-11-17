@@ -82,6 +82,10 @@ export async function describirRegistro(tipo: string | null, id: string | null):
         const d = await prisma.dispositivoGPS.findUnique({ where: { id }, select: { codigoDispositivo: true, animal: SEL_ANIMAL } });
         return d ? { descripcion: `Collar GPS ${d.codigoDispositivo}`, animal: animalRef(d.animal), eliminado: false } : null;
       }
+      case 'Notificacion': {
+        const n = await prisma.notificacion.findUnique({ where: { id }, select: { titulo: true } });
+        return n ? { descripcion: `Alerta: ${n.titulo}`, eliminado: false } : null;
+      }
       case 'InventarioSemen': {
         const s = await prisma.inventarioSemen.findUnique({ where: { id }, select: { codigoDosis: true } });
         return s ? { descripcion: `Lote de semen ${s.codigoDosis}`, eliminado: false } : null;

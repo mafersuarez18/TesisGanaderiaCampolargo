@@ -359,7 +359,7 @@ export default function PaginaAuditoria() {
             <Icono nombre="search" clase="absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]" />
             <input
               type="text"
-              placeholder="Buscar usuario, recurso, descripción..."
+              placeholder="Buscar animal, usuario, acción..."
               value={busqueda}
               onChange={(e) => { setBusqueda(e.target.value); setPaginaActual(1); }}
               className="campo-entrada pl-10"

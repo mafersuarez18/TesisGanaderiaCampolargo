@@ -7,6 +7,7 @@ import {
   requerirPrivilegio,
 } from '../../compartido/middlewares/autenticacion';
 import { prisma } from '../../compartido/prisma/clientePrisma';
+import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
 import {
   respuestaExito,
   respuestaCreado,
@@ -115,8 +116,25 @@ const esquemaRegla = z.object({
   usuarioIds:             z.array(z.string().min(1)).default([]),
 });
 
+// Auditoría: la regla como estaba antes de editarla o eliminarla
+async function datosDeLaRegla(req: Request) {
+  const r = await prisma.reglaAlerta.findUnique({
+    where: { id: req.params['id'] as string },
+    select: {
+      nombre: true, tipoAlerta: true, prioridad: true, estado: true, umbralValor: true, umbralUnidad: true,
+      usuariosNotificados: { select: { usuario: { select: { nombre: true, apellido: true } } } },
+    },
+  });
+  if (!r) return null;
+  const { usuariosNotificados, ...datos } = r;
+  return {
+    ...datos,
+    destinatarios: usuariosNotificados.map((u) => `${u.usuario.nombre} ${u.usuario.apellido}`).join(', ') || '—',
+  };
+}
+
 // ── POST /api/alertas — crear regla de alerta ─────────────────────────────
-enrutador.post('/', requerirPrivilegio('alertas.gestionar_reglas'), async (req: Request, res: Response, next: NextFunction) => {
+enrutador.post('/', requerirPrivilegio('alertas.gestionar_reglas'), registrarAuditoria('Crear regla de alerta', 'ReglaAlerta'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { usuarioIds, ...datos } = esquemaRegla.parse(req.body);
     const regla = await prisma.reglaAlerta.create({
@@ -136,7 +154,7 @@ enrutador.post('/', requerirPrivilegio('alertas.gestionar_reglas'), async (req: 
 });
 
 // ── PATCH /api/alertas/:id — actualizar regla ─────────────────────────────
-enrutador.patch('/:id', requerirPrivilegio('alertas.gestionar_reglas'), async (req: Request, res: Response, next: NextFunction) => {
+enrutador.patch('/:id', requerirPrivilegio('alertas.gestionar_reglas'), registrarAuditoria('Actualizar regla de alerta', 'ReglaAlerta', datosDeLaRegla), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { usuarioIds, ...datos } = esquemaRegla.partial().parse(req.body);
     if (usuarioIds) {
@@ -159,7 +177,7 @@ enrutador.patch('/:id', requerirPrivilegio('alertas.gestionar_reglas'), async (r
 });
 
 // ── DELETE /api/alertas/:id — eliminar regla ───────────────────────────────
-enrutador.delete('/:id', requerirPrivilegio('alertas.gestionar_reglas'), async (req: Request, res: Response, next: NextFunction) => {
+enrutador.delete('/:id', requerirPrivilegio('alertas.gestionar_reglas'), registrarAuditoria('Eliminar regla de alerta (y sus alertas)', 'ReglaAlerta', datosDeLaRegla), async (req: Request, res: Response, next: NextFunction) => {
   try {
     await prisma.reglaAlerta.delete({
       where: { id: req.params['id'] as string },

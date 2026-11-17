@@ -30,12 +30,25 @@ function extraerModulo(url: string): string {
  */
 export function registrarAuditoria(
   descripcion: string,
-  entidadTipo?: string
+  entidadTipo?: string,
+  // Datos del registro ANTES de la acción (p. ej. el nombre de lo que se va a
+  // eliminar), para que la auditoría diga sobre qué se actuó aunque después
+  // el registro ya no exista.
+  capturarAnteriores?: (req: Request) => Promise<object | null | undefined>,
 ) {
   return async (req: Request, res: Response, siguiente: NextFunction): Promise<void> => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       siguiente();
       return;
+    }
+
+    let datosAnteriores: object | undefined;
+    if (capturarAnteriores) {
+      try {
+        datosAnteriores = (await capturarAnteriores(req)) ?? undefined;
+      } catch (err) {
+        logger.warn('No se pudieron capturar los datos anteriores para auditoría', { error: (err as Error).message });
+      }
     }
 
     const accion = obtenerTipoAccion(req.method);
@@ -83,6 +96,7 @@ export function registrarAuditoria(
           entidadTipo,
           entidadId: (req.params['id'] as string | undefined) ?? (exitosa ? idCreado : undefined),
           datosNuevos: datosEntrada as object,
+          ...(datosAnteriores && { datosAnteriores }),
           direccionIP: req.ip ?? req.socket.remoteAddress,
           agenteUsuario: req.headers['user-agent'],
           exitosa,

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { TipoAccionAuditoria } from '@prisma/client';
+import { TipoAccionAuditoria, Prisma } from '@prisma/client';
 import { verificarToken, requerirPrivilegio } from '../../compartido/middlewares/autenticacion';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 import { respuestaListado, respuestaExito } from '../../compartido/utilidades/respuestaHttp';
@@ -10,6 +10,53 @@ import { describirRegistro, datosLegibles, animalDeLosDatos } from './auditoria.
 import { calcularPaginacion, construirMeta } from '../../compartido/utilidades/paginacion';
 
 const enrutador = Router();
+
+// La búsqueda libre también encuentra las acciones relacionadas con un animal
+// (por nombre o identificación): las hechas sobre el animal mismo y sobre sus
+// consultas, tratamientos, pruebas, diagnósticos, eventos reproductivos,
+// gestaciones, vacunas y collar, más las que lo mencionan en los datos
+// enviados (animalId, madreId, padreId…).
+async function registrosDelAnimalBuscado(texto: string): Promise<{ condiciones: Prisma.RegistroAuditoriaWhereInput[] } | null> {
+  const animales = await prisma.animal.findMany({
+    where: { OR: [
+      { nombre: { contains: texto, mode: 'insensitive' } },
+      { numeroIdentificacion: { contains: texto, mode: 'insensitive' } },
+    ] },
+    select: { id: true },
+    take: 25,
+  });
+  if (!animales.length) return null;
+  const ids = animales.map((a) => a.id);
+  const delAnimal = { animalId: { in: ids } };
+  const deSuConsulta = { historialMedico: delAnimal };
+
+  const [consultas, tratamientos, pruebas, diagnosticos, eventos, inseminaciones, gestaciones, vacunas, collares] = await Promise.all([
+    prisma.historialMedico.findMany({ where: delAnimal, select: { id: true } }),
+    prisma.tratamiento.findMany({ where: deSuConsulta, select: { id: true } }),
+    prisma.pruebaComplementaria.findMany({ where: deSuConsulta, select: { id: true } }),
+    prisma.enfermedadDiagnosticada.findMany({ where: deSuConsulta, select: { id: true } }),
+    prisma.eventoReproductivo.findMany({ where: delAnimal, select: { id: true } }),
+    prisma.inseminacionArtificial.findMany({ where: { eventoReproductivo: delAnimal }, select: { id: true } }),
+    prisma.gestacion.findMany({ where: { madreId: { in: ids } }, select: { id: true } }),
+    prisma.registroVacunacion.findMany({ where: delAnimal, select: { id: true } }),
+    prisma.dispositivoGPS.findMany({ where: delAnimal, select: { id: true } }),
+  ]);
+  const entidades = [
+    ...ids,
+    ...[consultas, tratamientos, pruebas, diagnosticos, eventos, inseminaciones, gestaciones, vacunas, collares]
+      .flat().map((r) => r.id),
+  ];
+
+  return {
+    condiciones: [
+      { entidadId: { in: entidades } },
+      ...['animalId', 'madreId', 'padreId', 'toroId', 'receptoraId'].flatMap((clave) =>
+        ids.map((id) => ({ datosNuevos: { path: [clave], equals: id } })),
+      ),
+    ],
+  };
+}
+
 
 enrutador.use(verificarToken, requerirPrivilegio('auditoria.ver'));
 
@@ -34,6 +81,8 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
       porPagina:  z.coerce.number().int().positive().max(100).default(25),
     }).parse(req.query);
 
+    const relacionados = filtros.busqueda ? await registrosDelAnimalBuscado(filtros.busqueda) : null;
+
     const donde = {
       ...(filtros.usuarioId && { usuarioId: filtros.usuarioId }),
       ...(filtros.accion    && { accion: filtros.accion }),
@@ -49,6 +98,8 @@ enrutador.get('/', async (req: Request, res: Response, next: NextFunction) => {
             { apellido: { contains: filtros.busqueda, mode: 'insensitive' as const } },
             { correo:   { contains: filtros.busqueda, mode: 'insensitive' as const } },
           ] } },
+          // Acciones sobre un animal cuyo nombre o identificación coincide
+          ...(relacionados?.condiciones ?? []),
         ],
       }),
       ...((filtros.desde || filtros.hasta) && {
