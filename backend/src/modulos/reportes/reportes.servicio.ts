@@ -344,10 +344,24 @@ export async function generarInventario(
   formato: 'pdf' | 'excel',
   filtros: { anio: number; fincaId?: string; estado?: string },
 ) {
+  // Con un estado de salida (vendido, muerto, robado, transferido) el año
+  // filtra por el año en que el animal salió del hato. Si no tiene fecha de
+  // salida registrada, se usa la de su última actualización (cuando se le
+  // cambió el estado). Los activos son los de hoy: el año no aplica.
+  const desde = new Date(filtros.anio, 0, 1);
+  const hasta = new Date(filtros.anio, 11, 31, 23, 59, 59, 999);
+  const porAnioDeSalida = !!filtros.estado && filtros.estado !== 'ACTIVO';
+
   const animales = await prisma.animal.findMany({
     where: {
       ...(filtros.fincaId && { lote: { fincaId: filtros.fincaId } }),
       ...(filtros.estado  && { estado: filtros.estado as any }),
+      ...(porAnioDeSalida && {
+        OR: [
+          { fechaEgreso: { gte: desde, lte: hasta } },
+          { fechaEgreso: null, actualizadoEn: { gte: desde, lte: hasta } },
+        ],
+      }),
     },
     include: {
       raza: { select: { nombre: true } },
@@ -358,7 +372,8 @@ export async function generarInventario(
 
   const totalMachos  = animales.filter((a) => a.sexo === 'MACHO').length;
   const totalHembras = animales.filter((a) => a.sexo === 'HEMBRA').length;
-  const subtitulo    = `${animales.length} animales  ·  ${totalMachos} machos  ·  ${totalHembras} hembras${filtros.fincaId ? '' : '  ·  Todas las fincas'}`;
+  const subtitulo    = `${animales.length} animales  ·  ${totalMachos} machos  ·  ${totalHembras} hembras`
+    + `${porAnioDeSalida ? `  ·  Salida del hato en ${filtros.anio}` : ''}${filtros.fincaId ? '' : '  ·  Todas las fincas'}`;
 
   if (formato === 'pdf') {
     const doc = new PDFDocument({ margin: ML, size: 'A4', bufferPages: true, autoFirstPage: true });

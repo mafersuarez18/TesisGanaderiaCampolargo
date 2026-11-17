@@ -17,6 +17,9 @@ interface TipoReporte {
   fondoIcono: string;
   endpoint: string;
   formatos: ('pdf' | 'excel')[];
+  // Parámetros globales que este reporte tiene en cuenta (los demás los ignora)
+  filtros: string[];
+  notaFiltros?: string;
 }
 
 export default function PaginaReportes() {
@@ -69,6 +72,8 @@ export default function PaginaReportes() {
       fondoIcono:  'bg-secondary/10',
       endpoint:    '/reportes/inventario',
       formatos:    ['pdf', 'excel'],
+      filtros:     ['Estado', 'Finca', 'Año'],
+      notaFiltros: 'El año aplica a vendidos, muertos, robados o transferidos: los que salieron del hato ese año. Con "Activos" muestra el hato de hoy.',
     },
     {
       id:          'sanitario',
@@ -79,6 +84,7 @@ export default function PaginaReportes() {
       fondoIcono:  'bg-error-container',
       endpoint:    '/reportes/sanitario',
       formatos:    ['pdf', 'excel'],
+      filtros:     ['Año', 'Finca'],
     },
     {
       id:          'vacunacion',
@@ -89,6 +95,8 @@ export default function PaginaReportes() {
       fondoIcono:  'bg-primary/10',
       endpoint:    '/reportes/vacunacion',
       formatos:    ['pdf', 'excel'],
+      filtros:     ['Finca'],
+      notaFiltros: 'Siempre usa los animales activos y su estado de vacunación a hoy.',
     },
     {
       id:          'reproductivo',
@@ -99,6 +107,7 @@ export default function PaginaReportes() {
       fondoIcono:  'bg-tertiary/10',
       endpoint:    '/reportes/reproductivo',
       formatos:    ['pdf', 'excel'],
+      filtros:     ['Año', 'Finca'],
     },
   ];
 
@@ -188,6 +197,15 @@ export default function PaginaReportes() {
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-on-surface">{rep.titulo}</h3>
                 <p className="text-sm text-on-surface-variant mt-1 leading-relaxed">{rep.descripcion}</p>
+                <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                  <span className="text-[11px] font-semibold text-on-surface-variant">Usa:</span>
+                  {rep.filtros.map((f) => (
+                    <span key={f} className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">{f}</span>
+                  ))}
+                </div>
+                {rep.notaFiltros && (
+                  <p className="text-[11px] text-outline mt-1.5 leading-snug">{rep.notaFiltros}</p>
+                )}
               </div>
             </div>
 
