@@ -625,6 +625,21 @@ export default function PaginaAlertas() {
                               </button>
                             </div>
                           )}
+                          {/* Vacuna próxima o vencida: registrar la dosis cierra la alerta;
+                              "Atender" solo la cierra, sin registrar la aplicación */}
+                          {notif.entidadTipo === 'RegistroVacunacion' && notif.estado !== 'DESCARTADA' && notif.entidadId
+                            && tienePrivilegio('vacunacion.registrar') && (
+                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+                              <span className="text-xs font-medium text-on-surface-variant">¿Ya se aplicó?</span>
+                              <button
+                                onClick={() => navegar(`/vacunacion?aplicar=${notif.entidadId}`)}
+                                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                              >
+                                <Icono nombre="vaccines" clase="text-[14px]" />
+                                Registrar aplicación
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <span className="text-[10px] text-outline whitespace-nowrap flex-shrink-0">
                           {tiempoRelativo(notif.creadoEn)}

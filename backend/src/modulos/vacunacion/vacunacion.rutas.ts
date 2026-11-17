@@ -7,6 +7,7 @@ import {
   requerirPrivilegio,
 } from '../../compartido/middlewares/autenticacion';
 import { registrarAuditoria } from '../../compartido/middlewares/auditoria';
+import { ErrorNoEncontrado } from '../../compartido/tipos/respuesta';
 import {
   controladorListarCalendarios,
   controladorObtenerCalendario,
@@ -65,6 +66,19 @@ enrutador.get('/vitaminas', requerirPrivilegio('vacunacion.ver'), async (req: Re
       take: 50,
     });
     return respuestaExito(res, vitaminas);
+  } catch (error) { return next(error); }
+});
+
+// Animal y protocolo de una aplicación: lo usa la alerta de vacuna próxima o
+// vencida para abrir el registro de la nueva dosis ya prellenado
+enrutador.get('/registros/:id', requerirPrivilegio('vacunacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const registro = await prisma.registroVacunacion.findUnique({
+      where: { id: req.params['id'] as string },
+      select: { id: true, animalId: true, calendarioVacunacionId: true, proximaFecha: true },
+    });
+    if (!registro) throw new ErrorNoEncontrado('Registro de vacunación');
+    return respuestaExito(res, registro);
   } catch (error) { return next(error); }
 });
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -192,6 +192,29 @@ export default function PaginaVacunacion() {
   const [registroEditar, setRegistroEditar]             = useState<RegistroVacunacion | null>(null);
   const [registroEliminar, setRegistroEliminar]         = useState<string | null>(null);
   const [vitaminaSeleccionada, setVitaminaSeleccionada] = useState<RegistroVitamina | null>(null);
+  // Protocolo con el que abrir el formulario al venir desde una alerta
+  const [calendarioPrefill, setCalendarioPrefill]       = useState<string | null>(null);
+
+  // ?aplicar=<registro> (desde la alerta de vacuna próxima/vencida): abre el
+  // registro de la nueva dosis con el animal y el protocolo de esa aplicación.
+  // Al guardarla, el backend cierra la alerta.
+  const registroAplicar = parametrosUrl.get('aplicar');
+  const { data: datosAplicar } = useQuery<{ animalId: string; calendarioVacunacionId: string }>({
+    queryKey: ['registro-vacunacion', registroAplicar],
+    queryFn: () => clienteHttp.get(`/vacunacion/registros/${registroAplicar}`).then((r) => r.data.datos),
+    enabled: !!registroAplicar && puedeEditar,
+  });
+  useEffect(() => {
+    if (!datosAplicar || !registroAplicar) return;
+    const p = new URLSearchParams(parametrosUrl);
+    p.delete('aplicar');
+    p.set('animalId', datosAplicar.animalId);
+    setParametrosUrl(p, { replace: true });
+    setCalendarioActivo(null);
+    setCalendarioPrefill(datosAplicar.calendarioVacunacionId);
+    setPestanaActiva('registros');
+    setMostrarFormRegistro(true);
+  }, [datosAplicar, registroAplicar, parametrosUrl, setParametrosUrl]);
 
   // ── Queries ─────────────────────────────────────────────────────────────────
   const { data: calendarios, isLoading: cargandoCalendarios } = useQuery<CalendarioVacunacion[]>({
@@ -1135,16 +1158,25 @@ export default function PaginaVacunacion() {
 
       {/* Modal: Registrar Vacunación */}
       <AnimatePresence>
-        {mostrarFormRegistro && (
+        {/* Con protocolo prellenado se espera a tener los calendarios: el
+            formulario toma sus valores iniciales al montarse */}
+        {mostrarFormRegistro && (!calendarioPrefill || calendarios) && (
           <FormularioRegistro
-            calendarioPredeterminado={calendarioActivo ?? undefined}
+            calendarioPredeterminado={
+              calendarioActivo ?? calendarios?.find((c) => c.id === calendarioPrefill) ?? undefined
+            }
             animalPredeterminado={animalIdFiltro}
             todosCalendarios={calendarios ?? []}
-            onCerrar={() => setMostrarFormRegistro(false)}
+            onCerrar={() => { setMostrarFormRegistro(false); setCalendarioPrefill(null); }}
             onExito={() => {
               queryClient.invalidateQueries({ queryKey: ['registros-vacunacion'] });
               queryClient.invalidateQueries({ queryKey: ['calendarios-vacunacion'] });
+              // Registrar la dosis cierra la alerta de vacuna próxima/vencida
+              queryClient.invalidateQueries({ queryKey: ['notificaciones'] });
+              queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
+              queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
               setMostrarFormRegistro(false);
+              setCalendarioPrefill(null);
             }}
           />
         )}
