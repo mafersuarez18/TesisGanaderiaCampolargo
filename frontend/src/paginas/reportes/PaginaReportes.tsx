@@ -315,7 +315,7 @@ export default function PaginaReportes() {
           <p className="font-medium text-on-surface mb-1">Sobre los reportes</p>
           <p>
             Los reportes se generan en tiempo real con los datos actuales de la base de datos.
-            Los filtros de año, estado y finca aplican a todos los reportes.
+            Cada reporte toma solo los parámetros globales indicados en su tarjeta ("Usa:") e ignora los demás.
             Los archivos Excel pueden abrirse en Microsoft Excel, Google Sheets o LibreOffice Calc.
           </p>
         </div>
