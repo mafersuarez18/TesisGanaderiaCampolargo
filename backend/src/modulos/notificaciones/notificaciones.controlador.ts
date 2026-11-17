@@ -9,6 +9,7 @@ import {
   eliminarNotificacion,
   abordarNotificacion,
   abordarTodasNotificaciones,
+  obtenerDetalleNotificacion,
 } from './notificaciones.servicio';
 import {
   respuestaExito,
@@ -92,5 +93,14 @@ export async function controladorAbordarTodasNotificaciones(
   try {
     const resultado = await abordarTodasNotificaciones(req.usuarioActual!.id);
     return respuestaExito(res, resultado);
+  } catch (error) { return next(error); }
+}
+
+export async function controladorDetalleNotificacion(
+  req: Request, res: Response, next: NextFunction,
+) {
+  try {
+    const detalle = await obtenerDetalleNotificacion(req.params['id'] as string, req.usuarioActual!.id);
+    return respuestaExito(res, detalle);
   } catch (error) { return next(error); }
 }

@@ -1,6 +1,7 @@
 import { Prisma, PrioridadAlerta } from '@prisma/client';
 import { prisma } from '../../compartido/prisma/clientePrisma';
 import { ErrorNoEncontrado } from '../../compartido/tipos/respuesta';
+import { describirRegistro } from '../auditoria/auditoria.detalle';
 
 // Las notificaciones las genera el motor de alertas (alertas.scheduler.ts);
 // este módulo solo se encarga de listarlas, marcarlas como leídas/abordadas
@@ -162,4 +163,46 @@ export async function resolverNotificacionesDeEntidad(
     // Quien hizo la acción que resolvió la alerta queda como quien la atendió
     data: { estado: 'DESCARTADA', leida: true, fechaLeida: new Date(), atendidaPorId },
   });
+}
+
+/**
+ * Detalle de una alerta para explicarla: la regla que la generó (con su
+ * umbral), a quiénes les llegó, quién la atendió y el registro al que se
+ * refiere (descrito en lenguaje natural, con su animal).
+ */
+export async function obtenerDetalleNotificacion(id: string, usuarioId: string) {
+  const notificacion = await prisma.notificacion.findFirst({
+    where: { id, ...perteneceAUsuario(usuarioId) },
+    include: {
+      atendidaPor: { select: { nombre: true, apellido: true } },
+      reglaUsuario: {
+        select: {
+          reglaAlerta: {
+            select: { nombre: true, descripcion: true, tipoAlerta: true, umbralValor: true, umbralUnidad: true },
+          },
+        },
+      },
+    },
+  });
+  if (!notificacion) throw new ErrorNoEncontrado('Notificación no encontrada');
+
+  const copias = await prisma.notificacion.findMany({
+    where: mismaAlerta(notificacion),
+    select: {
+      usuario: { select: { nombre: true, apellido: true } },
+      reglaUsuario: { select: { usuario: { select: { nombre: true, apellido: true } } } },
+    },
+  });
+  const destinatarios = [...new Set(copias
+    .map((c) => c.usuario ?? c.reglaUsuario?.usuario)
+    .filter((u): u is { nombre: string; apellido: string } => !!u)
+    .map((u) => `${u.nombre} ${u.apellido}`))];
+
+  const { reglaUsuario, ...datos } = notificacion;
+  return {
+    ...datos,
+    regla: reglaUsuario?.reglaAlerta ?? null,
+    destinatarios,
+    registro: await describirRegistro(notificacion.entidadTipo, notificacion.entidadId),
+  };
 }

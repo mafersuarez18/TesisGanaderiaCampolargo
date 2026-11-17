@@ -40,13 +40,26 @@ export default function BuscadorAnimal({
   const [animalMostrado, setAnimalMostrado] = useState<AnimalResumen | null>(null);
   const refContenedor = useRef<HTMLDivElement>(null);
 
-  // Cuando el valor cambia externamente, limpiar el texto de búsqueda
+  // Cuando el valor cambia externamente: si se vacía, limpiar el texto de
+  // búsqueda; si llega un animal ya elegido (p. ej. al abrir el formulario
+  // desde una alerta o desde su ficha), cargarlo para mostrarlo.
   useEffect(() => {
     if (!valor) {
       setAnimalMostrado(null);
       setTermino('');
+      return;
     }
-  }, [valor]);
+    if (animalMostrado?.id === valor) return;
+    let vigente = true;
+    clienteHttp
+      .get(`/animales/${valor}`, { silencioso: true })
+      .then((r) => {
+        const a = r.data.datos;
+        if (vigente && a) setAnimalMostrado({ id: a.id, numeroIdentificacion: a.numeroIdentificacion, nombre: a.nombre, sexo: a.sexo });
+      })
+      .catch(() => { /* sin permiso o sin conexión: el campo queda como estaba */ });
+    return () => { vigente = false; };
+  }, [valor]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: resultados = [], isFetching } = useQuery<AnimalResumen[]>({
     queryKey: ['animales-busqueda', termino, sexo],

@@ -11,6 +11,7 @@ import {
   controladorEliminarNotificacion,
   controladorAbordarNotificacion,
   controladorAbordarTodasNotificaciones,
+  controladorDetalleNotificacion,
 } from './notificaciones.controlador';
 
 const enrutador = Router();
@@ -44,6 +45,9 @@ enrutador.get('/no-leidas/conteo', autenticado, controladorContarNoLeidas);
 
 // PATCH /api/notificaciones/marcar-todas-leidas
 enrutador.patch('/marcar-todas-leidas', autenticado, controladorMarcarTodasLeidas);
+
+// GET /api/notificaciones/:id/detalle — de qué se trata la alerta
+enrutador.get('/:id/detalle', autenticado, controladorDetalleNotificacion);
 
 // PATCH /api/notificaciones/:id/leer
 enrutador.patch('/:id/leer', autenticado, controladorMarcarLeida);

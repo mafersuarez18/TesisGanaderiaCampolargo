@@ -69,16 +69,34 @@ enrutador.get('/vitaminas', requerirPrivilegio('vacunacion.ver'), async (req: Re
   } catch (error) { return next(error); }
 });
 
-// Animal y protocolo de una aplicación: lo usa la alerta de vacuna próxima o
-// vencida para abrir el registro de la nueva dosis ya prellenado
+// Datos de una aplicación: los usa la alerta de vacuna próxima o vencida para
+// abrir el registro de la nueva dosis prellenado con la anterior
 enrutador.get('/registros/:id', requerirPrivilegio('vacunacion.ver'), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const registro = await prisma.registroVacunacion.findUnique({
       where: { id: req.params['id'] as string },
-      select: { id: true, animalId: true, calendarioVacunacionId: true, proximaFecha: true },
+      select: {
+        id: true, animalId: true, calendarioVacunacionId: true, proximaFecha: true,
+        fechaAplicacion: true, dosis: true, viaAdministracion: true, lote: true,
+      },
     });
     if (!registro) throw new ErrorNoEncontrado('Registro de vacunación');
-    return respuestaExito(res, registro);
+
+    // Dato que la aplicación anterior no tenga: el de la aplicación más
+    // reciente de la misma vacuna que sí lo registró
+    const completar = async (campo: 'dosis' | 'viaAdministracion' | 'lote') => {
+      if (registro[campo]) return registro[campo];
+      const otra = await prisma.registroVacunacion.findFirst({
+        where: { calendarioVacunacionId: registro.calendarioVacunacionId, [campo]: { not: null } },
+        orderBy: { fechaAplicacion: 'desc' },
+        select: { [campo]: true },
+      });
+      return (otra as Record<string, string | null> | null)?.[campo] ?? null;
+    };
+    const [dosis, viaAdministracion, lote] = await Promise.all([
+      completar('dosis'), completar('viaAdministracion'), completar('lote'),
+    ]);
+    return respuestaExito(res, { ...registro, dosis, viaAdministracion, lote });
   } catch (error) { return next(error); }
 });
 

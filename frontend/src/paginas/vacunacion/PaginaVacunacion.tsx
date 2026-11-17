@@ -133,6 +133,15 @@ interface FormCalendario {
   aplicaACondicion: '' | Condicion;
 }
 
+interface AplicacionPrevia {
+  animalId: string;
+  calendarioVacunacionId: string;
+  fechaAplicacion: string;
+  dosis: string | null;
+  viaAdministracion: string | null;
+  lote: string | null;
+}
+
 interface FormRegistro {
   calendarioVacunacionId: string;
   animalId: string;
@@ -192,14 +201,14 @@ export default function PaginaVacunacion() {
   const [registroEditar, setRegistroEditar]             = useState<RegistroVacunacion | null>(null);
   const [registroEliminar, setRegistroEliminar]         = useState<string | null>(null);
   const [vitaminaSeleccionada, setVitaminaSeleccionada] = useState<RegistroVitamina | null>(null);
-  // Protocolo con el que abrir el formulario al venir desde una alerta
-  const [calendarioPrefill, setCalendarioPrefill]       = useState<string | null>(null);
+  // Aplicación anterior con la que prellenar el formulario al venir desde una alerta
+  const [aplicacionPrevia, setAplicacionPrevia]         = useState<AplicacionPrevia | null>(null);
 
   // ?aplicar=<registro> (desde la alerta de vacuna próxima/vencida): abre el
-  // registro de la nueva dosis con el animal y el protocolo de esa aplicación.
-  // Al guardarla, el backend cierra la alerta.
+  // registro de la nueva dosis con el animal, el protocolo, la dosis, la vía y
+  // el lote de esa aplicación. Al guardarla, el backend cierra la alerta.
   const registroAplicar = parametrosUrl.get('aplicar');
-  const { data: datosAplicar } = useQuery<{ animalId: string; calendarioVacunacionId: string }>({
+  const { data: datosAplicar } = useQuery<AplicacionPrevia>({
     queryKey: ['registro-vacunacion', registroAplicar],
     queryFn: () => clienteHttp.get(`/vacunacion/registros/${registroAplicar}`).then((r) => r.data.datos),
     enabled: !!registroAplicar && puedeEditar,
@@ -211,7 +220,7 @@ export default function PaginaVacunacion() {
     p.set('animalId', datosAplicar.animalId);
     setParametrosUrl(p, { replace: true });
     setCalendarioActivo(null);
-    setCalendarioPrefill(datosAplicar.calendarioVacunacionId);
+    setAplicacionPrevia(datosAplicar);
     setPestanaActiva('registros');
     setMostrarFormRegistro(true);
   }, [datosAplicar, registroAplicar, parametrosUrl, setParametrosUrl]);
@@ -1160,14 +1169,17 @@ export default function PaginaVacunacion() {
       <AnimatePresence>
         {/* Con protocolo prellenado se espera a tener los calendarios: el
             formulario toma sus valores iniciales al montarse */}
-        {mostrarFormRegistro && (!calendarioPrefill || calendarios) && (
+        {mostrarFormRegistro && (!aplicacionPrevia || calendarios) && (
           <FormularioRegistro
             calendarioPredeterminado={
-              calendarioActivo ?? calendarios?.find((c) => c.id === calendarioPrefill) ?? undefined
+              calendarioActivo
+                ?? calendarios?.find((c) => c.id === aplicacionPrevia?.calendarioVacunacionId)
+                ?? undefined
             }
-            animalPredeterminado={animalIdFiltro}
+            animalPredeterminado={aplicacionPrevia?.animalId ?? animalIdFiltro}
+            aplicacionPrevia={aplicacionPrevia ?? undefined}
             todosCalendarios={calendarios ?? []}
-            onCerrar={() => { setMostrarFormRegistro(false); setCalendarioPrefill(null); }}
+            onCerrar={() => { setMostrarFormRegistro(false); setAplicacionPrevia(null); }}
             onExito={() => {
               queryClient.invalidateQueries({ queryKey: ['registros-vacunacion'] });
               queryClient.invalidateQueries({ queryKey: ['calendarios-vacunacion'] });
@@ -1176,7 +1188,7 @@ export default function PaginaVacunacion() {
               queryClient.invalidateQueries({ queryKey: ['alertas-resumen'] });
               queryClient.invalidateQueries({ queryKey: ['notificaciones-conteo'] });
               setMostrarFormRegistro(false);
-              setCalendarioPrefill(null);
+              setAplicacionPrevia(null);
             }}
           />
         )}
@@ -1570,10 +1582,13 @@ function FormularioCalendario({ calendario, onCerrar, onExito }: {
 // ── Formulario: Registrar Vacunación ──────────────────────────────────────────
 
 function FormularioRegistro({
-  calendarioPredeterminado, animalPredeterminado, todosCalendarios, onCerrar, onExito,
+  calendarioPredeterminado, animalPredeterminado, aplicacionPrevia, todosCalendarios, onCerrar, onExito,
 }: {
   calendarioPredeterminado?: CalendarioVacunacion;
   animalPredeterminado?: string;
+  // Dosis anterior de este animal y protocolo: su dosis, vía y lote se proponen
+  // para la nueva (la fecha es hoy)
+  aplicacionPrevia?: AplicacionPrevia;
   todosCalendarios: CalendarioVacunacion[];
   onCerrar: () => void;
   onExito: () => void;
@@ -1582,7 +1597,10 @@ function FormularioRegistro({
     calendarioVacunacionId: calendarioPredeterminado?.id ?? '',
     animalId:        animalPredeterminado ?? '',
     fechaAplicacion: fechaLocalISO(),
-    dosis: '', viaAdministracion: '', lote: '', observaciones: '',
+    dosis:             aplicacionPrevia?.dosis ?? '',
+    viaAdministracion: aplicacionPrevia?.viaAdministracion ?? '',
+    lote:              aplicacionPrevia?.lote ?? '',
+    observaciones: '',
   });
   const [error, setError] = useState('');
 
@@ -1646,6 +1664,16 @@ function FormularioRegistro({
             }}
             className="p-6 space-y-4"
           >
+            {aplicacionPrevia && (
+              <div className="flex gap-2 p-3 rounded-xl bg-primary/10 text-xs text-on-surface">
+                <Icono nombre="history" clase="text-[16px] text-primary shrink-0" />
+                <span>
+                  Datos tomados de la aplicación anterior
+                  ({new Date(aplicacionPrevia.fechaAplicacion).toLocaleDateString('es-VE')}).
+                  Revíselos, en especial el lote del frasco, antes de registrar.
+                </span>
+              </div>
+            )}
             {error && (
               <div className="flex items-center gap-2 px-4 py-3 bg-error-container border border-error/20 rounded-xl text-sm text-on-error-container">
                 <Icono nombre="error" clase="text-[18px] flex-shrink-0 text-error" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -7,6 +7,7 @@ import { useAutenticacion } from '../../hooks/useAutenticacion';
 import { BadgePrioridad } from '../../componentes/ui/Badge';
 import Paginacion from '../../componentes/ui/Paginacion';
 import Icono from '../../componentes/ui/Icono';
+import ModalDetalleAlerta from '../../componentes/alertas/ModalDetalleAlerta';
 import { ModalConfirmacion } from '../../componentes/ui/Modal';
 import ModalConfirmarServicio, { type ServicioAConfirmar } from '../../componentes/reproduccion/ModalConfirmarServicio';
 import ModalResultadoParto, { type GestacionACerrar } from '../../componentes/reproduccion/ModalResultadoParto';
@@ -186,6 +187,8 @@ export default function PaginaAlertas() {
   const navegar = useNavigate();
   // Tratamiento recién cerrado sin mejoría: se ofrece la consulta de seguimiento
   const [sinMejoria, setSinMejoria] = useState<string | null>(null);
+  // Alerta cuyo detalle (de qué se trata y qué hacer) está abierto
+  const [alertaDetalle, setAlertaDetalle] = useState<Notificacion | null>(null);
 
   const mutFinalizarTratamiento = useMutation({
     mutationFn: ({ tratamientoId, mejoro }: { tratamientoId: string; mejoro: boolean }) =>
@@ -201,6 +204,78 @@ export default function PaginaAlertas() {
     },
     onError: () => toast.error('Error al cerrar el tratamiento'),
   });
+
+  // Acciones que resuelven la alerta desde la misma tarjeta (y desde su
+  // detalle): ¿mejoró?, ¿quedó preñada?, ¿ya parió?, registrar la vacuna.
+  const accionesRapidas = (notif: Notificacion) => (
+    <>
+        {notif.entidadTipo === 'Tratamiento' && !notif.leida && notif.entidadId && (
+          <div className="flex items-center gap-2 mt-2.5">
+            <span className="text-xs font-medium text-on-surface-variant">¿El animal mejoró?</span>
+            <button
+              onClick={() => mutFinalizarTratamiento.mutate({ tratamientoId: notif.entidadId!, mejoro: true })}
+              disabled={mutFinalizarTratamiento.isPending}
+              className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            >
+              Sí, mejoró
+            </button>
+            <button
+              onClick={() => mutFinalizarTratamiento.mutate({ tratamientoId: notif.entidadId!, mejoro: false })}
+              disabled={mutFinalizarTratamiento.isPending}
+              className="px-3 py-1 rounded-lg text-xs font-semibold bg-error-container text-on-error-container hover:opacity-80 transition-colors disabled:opacity-50"
+            >
+              No mejoró
+            </button>
+          </div>
+        )}
+        {notif.entidadTipo === 'EventoReproductivo' && !notif.leida && notif.entidadId && (
+          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+            <span className="text-xs font-medium text-on-surface-variant">¿Quedó preñada?</span>
+            {[
+              { prenada: true,  et: 'Sí, preñada', clase: 'bg-primary/10 text-primary hover:bg-primary/20' },
+              { prenada: false, et: 'No, vacía',   clase: 'bg-error-container text-on-error-container hover:opacity-80' },
+            ].map((op) => (
+              <button
+                key={op.et}
+                onClick={() => {
+                  setPrenadaInicial(op.prenada);
+                  setServicioAConfirmar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) });
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${op.clase}`}
+              >
+                {op.et}
+              </button>
+            ))}
+          </div>
+        )}
+        {notif.entidadTipo === 'Gestacion' && !notif.leida && notif.entidadId && (
+          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+            <span className="text-xs font-medium text-on-surface-variant">¿Ya parió?</span>
+            <button
+              onClick={() => setGestacionACerrar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) })}
+              className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              Registrar resultado del parto
+            </button>
+          </div>
+        )}
+        {/* Vacuna próxima o vencida: registrar la dosis cierra la alerta;
+            "Atender" solo la cierra, sin registrar la aplicación */}
+        {notif.entidadTipo === 'RegistroVacunacion' && notif.estado !== 'DESCARTADA' && notif.entidadId
+          && tienePrivilegio('vacunacion.registrar') && (
+          <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+            <span className="text-xs font-medium text-on-surface-variant">¿Ya se aplicó?</span>
+            <button
+              onClick={() => navegar(`/vacunacion?aplicar=${notif.entidadId}`)}
+              className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              <Icono nombre="vaccines" clase="text-[14px]" />
+              Registrar aplicación
+            </button>
+          </div>
+        )}
+    </>
+  );
 
   const mutAbordarTodas = useMutation({
     mutationFn: () => clienteHttp.patch('/notificaciones/abordar-todas'),
@@ -276,6 +351,14 @@ export default function PaginaAlertas() {
 
   const notificaciones  = data?.datos ?? [];
   const meta            = data?.meta;
+
+  // Al atender o eliminar todas las alertas de la última página, esa página
+  // queda vacía: se pasa a la última que todavía tiene alertas.
+  useEffect(() => {
+    if (meta && paginaActual > 1 && notificaciones.length === 0) {
+      setPaginaActual(Math.max(1, meta.totalPaginas));
+    }
+  }, [meta, paginaActual, notificaciones.length]);
 
   // Filtro local por tipo de entidad (no viene del backend para no multiplicar endpoints)
   const notificacionesFiltradas = tipoFiltro
@@ -554,24 +637,40 @@ export default function PaginaAlertas() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`font-semibold text-sm ${notif.leida ? 'text-on-surface-variant' : 'text-on-surface'}`}>
+                            <button
+                              type="button"
+                              onClick={() => setAlertaDetalle(notif)}
+                              title="Ver de qué se trata y qué hacer"
+                              className={`font-semibold text-sm text-left hover:underline ${notif.leida ? 'text-on-surface-variant' : 'text-on-surface'}`}
+                            >
                               {notif.titulo}
-                            </span>
+                            </button>
                             {!notif.leida && (
                               <span className="w-2 h-2 rounded-full bg-error flex-shrink-0" />
                             )}
                             <BadgePrioridad prioridad={notif.prioridad} />
                           </div>
-                          <p className={`text-xs mt-1 ${notif.leida ? 'text-outline' : 'text-on-surface-variant'}`}>
+                          <p
+                            onClick={() => setAlertaDetalle(notif)}
+                            className={`text-xs mt-1 cursor-pointer ${notif.leida ? 'text-outline' : 'text-on-surface-variant'}`}
+                          >
                             {notif.mensaje}
                           </p>
-                          {notif.entidadTipo && (
-                            <div className="flex items-center gap-1.5 mt-1.5">
+                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                            {notif.entidadTipo && (
                               <span className="px-2 py-0.5 bg-surface-container rounded-full text-[10px] text-on-surface-variant">
                                 {ETIQUETA_TIPO[notif.entidadTipo] ?? notif.entidadTipo}
                               </span>
-                            </div>
-                          )}
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setAlertaDetalle(notif)}
+                              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold text-primary hover:bg-primary/10"
+                            >
+                              <Icono nombre="info" clase="text-[12px]" />
+                              Ver detalle
+                            </button>
+                          </div>
                           {notif.estado === 'DESCARTADA' && (
                             <p className="flex items-center gap-1 mt-1.5 text-[11px] text-primary">
                               <Icono nombre="task_alt" clase="text-[13px]" />
@@ -583,71 +682,7 @@ export default function PaginaAlertas() {
                               })}`}
                             </p>
                           )}
-                          {notif.entidadTipo === 'Tratamiento' && !notif.leida && notif.entidadId && (
-                            <div className="flex items-center gap-2 mt-2.5">
-                              <span className="text-xs font-medium text-on-surface-variant">¿El animal mejoró?</span>
-                              <button
-                                onClick={() => mutFinalizarTratamiento.mutate({ tratamientoId: notif.entidadId!, mejoro: true })}
-                                disabled={mutFinalizarTratamiento.isPending}
-                                className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
-                              >
-                                Sí, mejoró
-                              </button>
-                              <button
-                                onClick={() => mutFinalizarTratamiento.mutate({ tratamientoId: notif.entidadId!, mejoro: false })}
-                                disabled={mutFinalizarTratamiento.isPending}
-                                className="px-3 py-1 rounded-lg text-xs font-semibold bg-error-container text-on-error-container hover:opacity-80 transition-colors disabled:opacity-50"
-                              >
-                                No mejoró
-                              </button>
-                            </div>
-                          )}
-                          {notif.entidadTipo === 'EventoReproductivo' && !notif.leida && notif.entidadId && (
-                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                              <span className="text-xs font-medium text-on-surface-variant">¿Quedó preñada?</span>
-                              {[
-                                { prenada: true,  et: 'Sí, preñada', clase: 'bg-primary/10 text-primary hover:bg-primary/20' },
-                                { prenada: false, et: 'No, vacía',   clase: 'bg-error-container text-on-error-container hover:opacity-80' },
-                              ].map((op) => (
-                                <button
-                                  key={op.et}
-                                  onClick={() => {
-                                    setPrenadaInicial(op.prenada);
-                                    setServicioAConfirmar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) });
-                                  }}
-                                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${op.clase}`}
-                                >
-                                  {op.et}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          {notif.entidadTipo === 'Gestacion' && !notif.leida && notif.entidadId && (
-                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                              <span className="text-xs font-medium text-on-surface-variant">¿Ya parió?</span>
-                              <button
-                                onClick={() => setGestacionACerrar({ id: notif.entidadId!, descripcion: sujetoDeTitulo(notif.titulo) })}
-                                className="px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                              >
-                                Registrar resultado del parto
-                              </button>
-                            </div>
-                          )}
-                          {/* Vacuna próxima o vencida: registrar la dosis cierra la alerta;
-                              "Atender" solo la cierra, sin registrar la aplicación */}
-                          {notif.entidadTipo === 'RegistroVacunacion' && notif.estado !== 'DESCARTADA' && notif.entidadId
-                            && tienePrivilegio('vacunacion.registrar') && (
-                            <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                              <span className="text-xs font-medium text-on-surface-variant">¿Ya se aplicó?</span>
-                              <button
-                                onClick={() => navegar(`/vacunacion?aplicar=${notif.entidadId}`)}
-                                className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-                              >
-                                <Icono nombre="vaccines" clase="text-[14px]" />
-                                Registrar aplicación
-                              </button>
-                            </div>
-                          )}
+                          {accionesRapidas(notif)}
                         </div>
                         <span className="text-[10px] text-outline whitespace-nowrap flex-shrink-0">
                           {tiempoRelativo(notif.creadoEn)}
@@ -697,6 +732,13 @@ export default function PaginaAlertas() {
           )}
         </motion.div>
       )}
+
+      <ModalDetalleAlerta
+        notificacionId={alertaDetalle?.id ?? null}
+        alCerrar={() => setAlertaDetalle(null)}
+        acciones={alertaDetalle && accionesRapidas(alertaDetalle)}
+        alAtender={alertaDetalle ? () => mutAbordar.mutate(alertaDetalle.id) : undefined}
+      />
 
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {/* PESTAÑA: REGLAS DE ALERTA                                             */}
