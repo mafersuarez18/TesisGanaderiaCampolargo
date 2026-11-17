@@ -934,6 +934,19 @@ export default function PaginaHistorialMedico() {
                   </section>
                 )}
 
+                {/* Con pruebas pendientes se puede agregar aquí lo provisional
+                    (no esperar al laboratorio); lo definitivo va con el resultado */}
+                {puedeCompletar && (
+                  <div className="flex gap-2 p-3 rounded-xl bg-surface-container border border-outline-variant/20 text-xs text-on-surface-variant">
+                    <Icono nombre="hourglass_top" clase="text-[15px] text-tertiary shrink-0 mt-px" />
+                    <span>
+                      <strong className="text-on-surface">Mientras llegan los resultados:</strong> aquí puede registrar un
+                      diagnóstico presuntivo o iniciar un tratamiento sin esperar al laboratorio. El diagnóstico y el
+                      tratamiento definitivos se registran junto con el resultado de la prueba, más arriba.
+                    </span>
+                  </div>
+                )}
+
                 {/* ── Enfermedades ── */}
                 {(historialSeleccionado.enfermedades.length > 0 || puedeCompletar) && (
                   <section>
@@ -942,9 +955,7 @@ export default function PaginaHistorialMedico() {
                     </p>
                     <div className="space-y-2">
                       {historialSeleccionado.enfermedades.length === 0 && (
-                        <p className="text-xs text-on-surface-variant italic">
-                          Sin diagnóstico registrado. Si depende de las pruebas complementarias, agréguelo cuando lleguen los resultados.
-                        </p>
+                        <p className="text-xs text-on-surface-variant italic">Sin diagnóstico registrado.</p>
                       )}
                       {historialSeleccionado.enfermedades.map((e) => diagnosticoEnEdicion === e.id ? (
                         <FormularioDiagnostico
@@ -1024,7 +1035,7 @@ export default function PaginaHistorialMedico() {
                         ) : (
                           <button type="button" onClick={() => setDiagnosticoEnEdicion('nuevo')}
                             className="w-full flex items-center justify-center gap-2 py-2 border border-dashed border-primary/40 rounded-xl text-sm text-primary hover:bg-primary/5 transition-colors">
-                            <Icono nombre="add" clase="text-[16px]" /> Agregar diagnóstico
+                            <Icono nombre="add" clase="text-[16px]" /> Agregar diagnóstico presuntivo
                           </button>
                         )
                       )}
@@ -1759,7 +1770,7 @@ function FormularioTratamientoPosterior({
     return (
       <button type="button" onClick={() => { setDatos(vacio()); setError(''); setAbierto(true); }}
         className="w-full flex items-center justify-center gap-2 py-2 border border-dashed border-primary/40 rounded-xl text-sm text-primary hover:bg-primary/5 transition-colors">
-        <Icono nombre="add" clase="text-[16px]" /> Agregar tratamiento
+        <Icono nombre="add" clase="text-[16px]" /> Agregar tratamiento mientras llegan los resultados
       </button>
     );
   }
