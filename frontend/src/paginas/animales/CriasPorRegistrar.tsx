@@ -17,6 +17,8 @@ export interface CriaPorRegistrar {
   observaciones: string | null;
   diasDeNacida: number;
   semental: string | null;
+  // Semental del semen si nació por inseminación: queda como su padre
+  sementalId: string | null;
   gestacion: {
     madre: {
       id: string;

@@ -45,7 +45,10 @@ const esquemaCrearAnimal = z.object({
   // Superficie del potrero nuevo (opcional; solo se usa al crearlo)
   potreroHectareas: z.number().positive().max(100000).optional(),
   razaId:          z.string().min(1),
-  padreId:         z.string().min(1).optional(),
+  // Padre: un toro del rebaño (padreId) o, si nació por inseminación, el
+  // semental del semen (sementalPadreId). null lo quita al editar.
+  padreId:         z.string().min(1).nullable().optional(),
+  sementalPadreId: z.string().min(1).nullable().optional(),
   madreId:         z.string().min(1).optional(),
 });
 

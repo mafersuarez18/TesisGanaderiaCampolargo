@@ -83,7 +83,9 @@ export interface DatosCrearAnimal {
   potreroNombre?: string;
   potreroHectareas?: number;
   razaId:         string;
-  padreId?:       string;
+  padreId?:       string | null;
+  // Semental del semen, cuando el animal nació por inseminación artificial
+  sementalPadreId?: string | null;
   madreId?:       string;
   // Nacimiento (registrado al cerrar un parto) del que proviene la cría.
   nacimientoId?:  string;
@@ -120,7 +122,16 @@ export async function servicioListarCriasPorRegistrar(fincaId?: string) {
     ...c,
     diasDeNacida: Math.max(0, Math.floor((hoy - c.fechaNacimiento.getTime()) / 86_400_000)),
     semental: c.gestacion.eventoReproductivo?.inseminacion?.inventarioSemen?.semental.nombre ?? null,
+    sementalId: c.gestacion.eventoReproductivo?.inseminacion?.inventarioSemen?.semental.id ?? null,
   }));
+}
+
+// El padre es un toro del rebaño o un semental (inseminación), no ambos
+async function validarSementalPadre(padreId?: string | null, sementalPadreId?: string | null) {
+  if (!sementalPadreId) return;
+  if (padreId) throw new ErrorValidacionDatos('Indique como padre un toro del rebaño o un semental, no ambos');
+  const semental = await prisma.semental.findUnique({ where: { id: sementalPadreId }, select: { id: true } });
+  if (!semental) throw new ErrorValidacionDatos('El semental especificado no existe');
 }
 
 export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
@@ -139,8 +150,13 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
     }
     datos.madreId = nacimiento.gestacion.madre.id;
     datos.padreId ??= nacimiento.gestacion.padre?.id;
+    // Nacida por inseminación: su padre es el semental del semen usado
+    if (!datos.padreId) {
+      datos.sementalPadreId ??= nacimiento.gestacion.eventoReproductivo?.inseminacion?.inventarioSemen?.semental.id;
+    }
     datos.fechaNacimiento = nacimiento.fechaNacimiento;
   }
+  await validarSementalPadre(datos.padreId, datos.sementalPadreId);
 
   if (datos.padreId) {
     const padre = await obtenerAnimalPorId(datos.padreId);
@@ -155,7 +171,7 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
   }
 
   const {
-    loteId, razaId, padreId, madreId, nacimientoId: _nacimientoId,
+    loteId, razaId, padreId, sementalPadreId, madreId, nacimientoId: _nacimientoId,
     potreroId: _p, potreroNombre, potreroHectareas, ...resto
   } = datos;
   const potreroId = await resolverPotrero(loteId, datos.potreroId, potreroNombre, potreroHectareas);
@@ -166,6 +182,7 @@ export async function servicioCrearAnimal(datos: DatosCrearAnimal) {
     ...(potreroId && { potrero: { connect: { id: potreroId } } }),
     raza:  { connect: { id: razaId } },
     ...(padreId && { padre: { connect: { id: padreId } } }),
+    ...(sementalPadreId && { sementalPadre: { connect: { id: sementalPadreId } } }),
     ...(madreId && { madre: { connect: { id: madreId } } }),
     ...(nacimiento && {
       pesoNacimiento: nacimiento.pesoAlNacer ?? undefined,
@@ -210,6 +227,7 @@ export async function servicioActualizarAnimal(
     if (!madre) throw new ErrorValidacionDatos('La madre especificada no existe');
     if (madre.sexo !== 'HEMBRA') throw new ErrorValidacionDatos('La madre debe ser de sexo HEMBRA');
   }
+  await validarSementalPadre(datos.padreId, datos.sementalPadreId);
   if (datos.sexo && datos.sexo !== animal.sexo) {
     const [hijos, gestaciones, eventosDeHembra] = await Promise.all([
       prisma.animal.count({ where: animal.sexo === 'MACHO' ? { padreId: id } : { madreId: id } }),
@@ -228,7 +246,9 @@ export async function servicioActualizarAnimal(
     }
   }
 
-  const { loteId, razaId, padreId, madreId, potreroId: potreroIdNuevo, potreroNombre, potreroHectareas, ...resto } = datos;
+  const {
+    loteId, razaId, padreId, sementalPadreId, madreId, potreroId: potreroIdNuevo, potreroNombre, potreroHectareas, ...resto
+  } = datos;
 
   // El potrero pertenece al lote: si se indica uno se valida contra el lote
   // final; si el animal cambia de lote sin indicar potrero, se le quita.
@@ -246,6 +266,12 @@ export async function servicioActualizarAnimal(
     ...(razaId  !== undefined && { raza: razaId ? { connect: { id: razaId } } : undefined }),
     ...(loteId  !== undefined && loteId && { lote: { connect: { id: loteId } } }),
     ...(padreId !== undefined && { padre: padreId ? { connect: { id: padreId } } : { disconnect: true } }),
+    ...(sementalPadreId !== undefined && {
+      sementalPadre: sementalPadreId ? { connect: { id: sementalPadreId } } : { disconnect: true },
+    }),
+    // Elegir uno de los dos tipos de padre quita el otro
+    ...(padreId && sementalPadreId === undefined && { sementalPadre: { disconnect: true } }),
+    ...(sementalPadreId && padreId === undefined && { padre: { disconnect: true } }),
     ...(madreId !== undefined && { madre: madreId ? { connect: { id: madreId } } : { disconnect: true } }),
   });
 }

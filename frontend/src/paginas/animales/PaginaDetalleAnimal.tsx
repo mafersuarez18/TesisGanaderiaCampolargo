@@ -246,6 +246,13 @@ export default function PaginaDetalleAnimal() {
                 >
                   {animal.padre.nombre ?? `#${animal.padre.numeroIdentificacion}`}
                 </Link>
+              ) : animal.sementalPadre ? (
+                <span className="text-sm text-on-surface">
+                  {animal.sementalPadre.nombre}
+                  <span className="text-xs text-on-surface-variant">
+                    {' '}· semental{animal.sementalPadre.raza?.nombre ? ` ${animal.sementalPadre.raza.nombre}` : ''} (inseminación artificial)
+                  </span>
+                </span>
               ) : '—'}
             </CampoDetalle>
             <CampoDetalle etiqueta="Madre">

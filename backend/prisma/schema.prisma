@@ -360,6 +360,9 @@ model Animal {
   razaId  String  @map("raza_id")
   padreId String? @map("padre_id") // Semental (padre biológico)
   madreId String? @map("madre_id") // Vaca (madre biológica)
+  // Padre por inseminación artificial: el semental del semen (no es un animal
+  // del rebaño). Excluyente con padreId.
+  sementalPadreId String? @map("semental_padre_id")
   // Nacimiento del cual proviene este animal, según el modelo lógico del tomo
   // (dirección inversa a Nacimiento.criaId, que ya cumple el mismo propósito)
   nacimientoId String? @unique @map("nacimiento_id")
@@ -375,6 +378,7 @@ model Animal {
   // Árbol genealógico (auto-referencia)
   padre       Animal?  @relation("Paternidad", fields: [padreId], references: [id])
   madre       Animal?  @relation("Maternidad", fields: [madreId], references: [id])
+  sementalPadre Semental? @relation(fields: [sementalPadreId], references: [id], onDelete: SetNull)
   hijosComoPadre Animal[] @relation("Paternidad")
   hijosComoMadre Animal[] @relation("Maternidad")
 
@@ -880,6 +884,7 @@ model Semental {
   raza   Raza   @relation(fields: [razaId], references: [id], onDelete: Restrict)
 
   inventariosSemen InventarioSemen[]
+  crias            Animal[]
 
   @@map("semental")
 }

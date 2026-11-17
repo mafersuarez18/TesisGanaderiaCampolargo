@@ -44,6 +44,7 @@ const seleccionDetalle = {
   fechaEgreso: true,
   motivoEgreso: true,
   padre: { select: { id: true, numeroIdentificacion: true, nombre: true } },
+  sementalPadre: { select: { id: true, nombre: true, registro: true, raza: { select: { nombre: true } } } },
   madre: { select: { id: true, numeroIdentificacion: true, nombre: true } },
   _count: {
     select: {
@@ -193,7 +194,7 @@ const seleccionCriaPendiente = {
       eventoReproductivo: {
         select: {
           tipo: true,
-          inseminacion: { select: { inventarioSemen: { select: { semental: { select: { nombre: true } } } } } },
+          inseminacion: { select: { inventarioSemen: { select: { semental: { select: { id: true, nombre: true } } } } } },
         },
       },
     },

@@ -58,6 +58,8 @@ const esquemaAnimal = z.object({
   razaTipoCruce:    z.string().max(100).optional().or(z.literal('')),
   razaOrigen:       z.string().max(200).optional().or(z.literal('')),
   padreId:          z.string().min(1).optional().or(z.literal('')),
+  // Padre por inseminación: semental del semen (excluyente con padreId)
+  sementalPadreId:  z.string().min(1).optional().or(z.literal('')),
   madreId:          z.string().min(1).optional().or(z.literal('')),
 }).superRefine((datos, ctx) => {
   if (datos.sexo === 'MACHO' && PROPOSITOS_SOLO_HEMBRA.includes(datos.proposito)) {
@@ -111,6 +113,12 @@ export default function PaginaFormAnimal() {
   const { data: fincas = [] } = useQuery({ queryKey: ['fincas-select'], queryFn: obtenerFincas });
   const { data: machos = [] } = useQuery({ queryKey: ['machos-select'], queryFn: () => obtenerAnimalesPorSexo('MACHO') });
   const { data: hembras = [] } = useQuery({ queryKey: ['hembras-select'], queryFn: () => obtenerAnimalesPorSexo('HEMBRA') });
+  // Sementales (padre por inseminación). Sin permiso de inseminación la
+  // lista llega vacía y solo se muestra el semental ya asignado.
+  const { data: sementales = [] } = useQuery<{ id: string; nombre: string; raza: { nombre: string } }[]>({
+    queryKey: ['sementales'],
+    queryFn: () => clienteHttp.get('/inseminacion/sementales').then((r) => r.data.datos ?? []),
+  });
 
   const {
     register,
@@ -171,6 +179,7 @@ export default function PaginaFormAnimal() {
         potreroNombre:   '',
         razaId:          animalExistente.raza?.id ?? '',
         padreId:         animalExistente.padre?.id ?? '',
+        sementalPadreId: animalExistente.sementalPadre?.id ?? '',
         madreId:         animalExistente.madre?.id ?? '',
         procedencia:     animalExistente.procedencia ?? '',
       });
@@ -196,8 +205,10 @@ export default function PaginaFormAnimal() {
       razaId:          madre.raza.id,
       madreId:         madre.id,
       padreId:         cria.gestacion.padre?.id ?? '',
+      // Nacida por inseminación: el padre es el semental del semen usado
+      sementalPadreId: cria.gestacion.padre ? '' : cria.sementalId ?? '',
       procedencia:     'Nacida en la finca',
-      observaciones:   cria.semental ? `Hija/o del semental ${cria.semental} (inseminación artificial).` : '',
+      observaciones:   '',
     });
   }, [cria, reset]);
 
@@ -249,7 +260,10 @@ export default function PaginaFormAnimal() {
         }).filter(([, v]) => v !== '' && v !== undefined && v !== null)
       );
       if (esEdicion) {
-        const { data } = await clienteHttp.patch(`/animales/${id}`, { ...payload, ...potrero }, { descripcionOffline: 'Edición de animal' });
+        // El padre se envía siempre (null = sin padre) para poder quitarlo o
+        // cambiar de toro a semental
+        const padres = { padreId: resto.padreId || null, sementalPadreId: resto.sementalPadreId || null };
+        const { data } = await clienteHttp.patch(`/animales/${id}`, { ...payload, ...padres, ...potrero }, { descripcionOffline: 'Edición de animal' });
         return data.datos;
       }
       const { data } = await clienteHttp.post(
@@ -518,17 +532,47 @@ export default function PaginaFormAnimal() {
         {/* Genealogía */}
         <SeccionFormulario titulo="Genealogía">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <CampoForm etiqueta="Padre (macho)" error={errors.padreId?.message}>
-              <select {...register('padreId')} className="campo-entrada">
+            <CampoForm etiqueta="Padre (toro o semental)" error={errors.padreId?.message ?? errors.sementalPadreId?.message}>
+              {/* Un solo selector para los dos tipos de padre: un toro del
+                  rebaño (monta) o el semental del semen (inseminación) */}
+              <select
+                className="campo-entrada"
+                value={watch('padreId') ? `toro:${watch('padreId')}` : watch('sementalPadreId') ? `semental:${watch('sementalPadreId')}` : ''}
+                onChange={(e) => {
+                  const [tipo, valor = ''] = e.target.value.split(':');
+                  setValue('padreId', tipo === 'toro' ? valor : '', { shouldDirty: true });
+                  setValue('sementalPadreId', tipo === 'semental' ? valor : '', { shouldDirty: true });
+                }}
+              >
                 <option value="">Sin padre registrado</option>
-                {(machos as any[])
-                  .filter((m: any) => m.id !== id)
-                  .map((m: any) => (
-                    <option key={m.id} value={m.id}>
-                      #{m.numeroIdentificacion}{m.nombre ? ` — ${m.nombre}` : ''}
+                <optgroup label="Toros del rebaño">
+                  {(machos as any[])
+                    .filter((m: any) => m.id !== id)
+                    .map((m: any) => (
+                      <option key={m.id} value={`toro:${m.id}`}>
+                        #{m.numeroIdentificacion}{m.nombre ? ` — ${m.nombre}` : ''}
+                      </option>
+                    ))}
+                </optgroup>
+                <optgroup label="Sementales (inseminación artificial)">
+                  {[
+                    ...sementales,
+                    // El ya asignado, aunque la lista no se haya podido cargar
+                    ...[animalExistente?.sementalPadre, cria?.sementalId && { id: cria.sementalId, nombre: cria.semental }]
+                      .filter((s: any) => s && !sementales.some((x) => x.id === s.id)),
+                  ].map((s: any) => (
+                    <option key={s.id} value={`semental:${s.id}`}>
+                      {s.nombre}{s.raza?.nombre ? ` — ${s.raza.nombre}` : ''}
                     </option>
                   ))}
+                </optgroup>
               </select>
+              {cria?.semental && !cria.gestacion.padre && (
+                <p className="text-xs text-[var(--color-verde-600)] mt-1 flex items-center gap-1">
+                  <Icono nombre="science" clase="text-[13px]" />
+                  Nació por inseminación con semen de {cria.semental}
+                </p>
+              )}
             </CampoForm>
             <CampoForm etiqueta="Madre (hembra)" error={errors.madreId?.message}>
               <select {...register('madreId')} className="campo-entrada" disabled={!!cria}>
@@ -545,7 +589,7 @@ export default function PaginaFormAnimal() {
           </div>
           <p className="text-xs text-outline mt-2 flex items-center gap-1.5">
             <Icono nombre="info" clase="text-[13px]" />
-            Solo aparecen animales activos. Si los padres no están en el sistema, déjelo en blanco.
+            Solo aparecen animales activos y los sementales registrados en Inseminación. Si los padres no están en el sistema, déjelo en blanco.
           </p>
         </SeccionFormulario>
 
